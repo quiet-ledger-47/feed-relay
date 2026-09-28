@@ -125,21 +125,34 @@ def key(it):
 #   delivered total <= max_total, RAM >= min_ram_gb, screen >= min_screen_in, a GPU that runs current games at
 #   low/medium (GTX 1660 Ti / RTX 2060 / RTX 3050 class or better), no 4-core H CPU, Windows OS, charger not excluded,
 #   working condition only, seller feedback >= min_feedback_pct. Nothing personal lives in this file.
+#   Screen must be CONFIRMED >= 15" (floor enforced in code), and any cosmetic damage or wear in the title,
+#   condition notes or description is a hard reject. eBay "Good - Refurbished" (visible wear) is excluded.
 HC = CFG.get("hunter") or {}
 MAX_TOTAL = float(HC.get("max_total", 500))
 MIN_TOTAL = float(HC.get("min_total", 180))          # below this is almost always parts/scam bait
 MIN_RAM = int(HC.get("min_ram_gb", 16))
-MIN_SCREEN = float(HC.get("min_screen_in", 14))
+MIN_SCREEN = max(15.0, float(HC.get("min_screen_in", 15)))   # hard floor: 15" class (15.6/16/17.3)
 MIN_FB = float(HC.get("min_feedback_pct", 97))
 MIN_FB_N = int(HC.get("min_feedback_n", 10))
 PREF_BRANDS = [b.lower() for b in HC.get("pref_brands", ["msi", "asus", "razer"])]
 DURABLE = re.compile(r"\b(?:msi|asus|rog|tuf|razer|legion|alienware|omen|aorus|gigabyte|predator|helios|"
                      r"thinkpad p|zbook|precision|xps|eurocom|clevo|xmg|eluktronics)\b", re.I)
-EBAY_Q = HC.get("ebay_q") or [
-    "gaming laptop rtx 3060", "gaming laptop rtx 3070", "gaming laptop rtx 2070", "gaming laptop rtx 2060",
-    "gaming laptop rtx 3050", "gaming laptop rtx 4050", "gaming laptop rtx 4060", "gaming laptop gtx 1660 ti",
-    "msi gaming laptop", "asus rog laptop", "asus tuf gaming laptop", "razer blade", "lenovo legion laptop",
-    "alienware laptop", "hp omen laptop", "gigabyte aorus laptop", "acer predator laptop"]
+EBAY_Q = [
+    # GPU sweeps
+    "gaming laptop rtx 3060", "gaming laptop rtx 3070", "gaming laptop rtx 3070 ti", "gaming laptop rtx 3080",
+    "gaming laptop rtx 2070", "gaming laptop rtx 2080", "gaming laptop rtx 2060", "gaming laptop rtx 3050 ti",
+    "gaming laptop rtx 3050", "gaming laptop rtx 4050", "gaming laptop rtx 4060", "gaming laptop rtx 4070",
+    "gaming laptop gtx 1660 ti", "15.6 gaming laptop rtx", "17.3 gaming laptop rtx", "16 inch gaming laptop rtx",
+    "refurbished gaming laptop rtx", "rx 6600m laptop", "rx 6700m laptop",
+    # model lines (durable chassis)
+    "msi katana", "msi pulse gl66", "msi crosshair", "msi sword", "msi gf65 thin", "msi gp66 leopard",
+    "msi gp76", "msi vector", "msi stealth 15", "msi raider", "asus rog strix g15", "asus rog strix g17",
+    "asus rog zephyrus g15", "asus rog zephyrus m16", "asus tuf a15", "asus tuf f15", "asus tuf a17",
+    "asus tuf f17", "razer blade 15", "razer blade 17", "lenovo legion 5", "lenovo legion 5 pro",
+    "lenovo legion 7", "lenovo loq", "alienware m15", "alienware m17", "hp omen 15", "hp omen 16",
+    "hp victus 16", "dell g15", "gigabyte aorus 15", "gigabyte g5", "acer nitro 5", "acer helios 300"]
+EBAY_Q += [q for q in (HC.get("ebay_q") or []) if q not in EBAY_Q]   # config adds to the sweep, never shrinks it
+EBAY_Q_PER_RUN = int(HC.get("ebay_q_per_run", 12))       # rotate through the list so every query runs ~hourly
 # eBay coupon codes (eBay-only promos surfaced via Slickdeals keyword RSS) - they stack on these listings
 COUPON_FEEDS = [("Slickdeals", sd(q)) for q in HC.get("coupon_q", ["ebay coupon", "ebay refurbished coupon"])]
 
@@ -150,6 +163,26 @@ JUNK = re.compile(r"\bparts\b|for parts|as[- ]is|not working|no (?:ssd|hdd|ram|o
 NO_CHARGER = re.compile(r"no (?:charger|power (?:adapter|supply|cord|brick)|ac adapter|adapter)|without (?:a )?"
                         r"(?:charger|power|adapter)|charger (?:not|isn.?t) included|(?:charger|adapter) sold separately|"
                         r"laptop only|unit only|does not (?:come with|include) (?:a )?(?:charger|power|adapter)", re.I)
+# Cosmetic damage / wear = hard reject (title, seller condition notes, item specifics, description).
+COSMETIC = re.compile(r"cosmetic (?:damage|wear|flaw|imperfection|blemish|issue|mark)s?|scratch(?:es|ed|y)?|scuff(?:s|ed)?|"
+                      r"\bdent(?:s|ed)?\b|\bdings?\b|\bchip(?:s|ped)?\b|crack(?:s|ed)?|gouge|\bworn\b|signs? of (?:use|wear)|"
+                      r"(?:light|minor|some|normal|moderate|heavy|visible|noticeable) (?:wear|use|marks?|blemish(?:es)?)|"
+                      r"wear (?:and|&) tear|wear marks?|shiny keys|missing (?:key|keycap|foot|feet|screw|rubber)|"
+                      r"broken (?:hinge|key|corner|tab)|loose hinge|hinge (?:issue|damage|crack)|discolou?r|yellow(?:ed|ing)|"
+                      r"\bstain(?:s|ed)?\b|sticker residue|residue|burn[- ]?in|dead pixels?|stuck pixels?|pressure (?:mark|spot)s?|"
+                      r"white spots?|screen (?:spot|line|mark|bleed)s?|backlight bleed|blemish(?:es)?|imperfections?|"
+                      r"\bdamage[ds]?\b|\bflaws?\b|\bcondition (?:is )?(?:fair|good)\b|\bfair condition\b", re.I)
+NEGATION = re.compile(r"(?:\bno|\bnot|\bwithout|\bzero|\bfree of|\bfree from|\bnever|\bnor|\bany)\W+(?:\w+\W+){0,3}$", re.I)
+
+def cosmetic_hit(txt):
+    """First cosmetic-damage phrase in txt that is not negated ("no scratches", "free of dents")."""
+    for m in COSMETIC.finditer(txt or ""):
+        if NEGATION.search(txt[max(0, m.start() - 40):m.start()]): continue
+        return m.group(0)
+    return None
+
+SCREEN_TXT = re.compile(r"(?<![\d.])(1[0-8](?:\.\d)?)\s?(?:\"|''|”|″|-?\s?in(?:ch(?:es)?)?\b|-inch)", re.I)
+
 HAS_CHARGER = re.compile(r"charger|power (?:adapter|supply|brick|cord)|ac adapter|\bpsu\b|power cable", re.I)
 GOOD_GPU = re.compile(r"\b(?:gtx ?1660 ?ti|gtx ?1070|gtx ?1080|rtx ?20[678]0(?: ?super| ?max-?q)?|"
                       r"rtx ?30[5-8]0(?: ?ti)?|rtx ?40[5-9]0|rtx ?50[5-9]0|"
@@ -199,7 +232,7 @@ def ebay_search(tok, q, auction=False):
     qs = urllib.parse.urlencode({"q": q, "category_ids": "177", "limit": "100",
         "sort": "endingSoonest" if auction else "newlyListed",
         "filter": f"price:[{lo}..{int(MAX_TOTAL)}],priceCurrency:USD,itemLocationCountry:US,"
-                  "conditionIds:{1000|1500|2000|2010|2020|2030|2500|3000},buyingOptions:{" + opt + "}"})
+                  "conditionIds:{1000|1500|2000|2010|2020|2500|3000},buyingOptions:{" + opt + "}"})
     data = ebay_json(tok, "https://api.ebay.com/buy/browse/v1/item_summary/search?" + qs) or {}
     out = []
     for x in data.get("itemSummaries") or []:
@@ -233,7 +266,10 @@ def ebay_items():
     tok = ebay_token()
     if not tok: return [], None
     items, seen_ids = [], set()
-    for q, auc in [(q, True) for q in AUCTION_Q] + [(q, False) for q in EBAY_Q]:
+    n = max(1, min(EBAY_Q_PER_RUN, len(EBAY_Q)))
+    start = (int(NOW.timestamp() // 900) * n) % len(EBAY_Q)        # 15-min slot -> rolling window of queries
+    bin_q = [EBAY_Q[(start + i) % len(EBAY_Q)] for i in range(n)]
+    for q, auc in [(q, True) for q in AUCTION_Q] + [(q, False) for q in bin_q]:
         for it in ebay_search(tok, q, auc):
             if it["id"] and it["id"] not in seen_ids: seen_ids.add(it["id"]); items.append(it)
         time.sleep(0.3)
@@ -260,8 +296,9 @@ def prefilter(it):
     if total > MAX_TOTAL or (total < MIN_TOTAL and not it.get("auction")): return False
     m = re.search(r"\b(\d{1,2}) ?gb\b(?! ?(?:ssd|hdd|emmc|gddr|vram|video))", t, re.I)
     if m and int(m.group(1)) < MIN_RAM and not re.search(r"\b(?:16|24|32|64) ?gb\b", t, re.I): return False
-    m = re.search(r"\b(1[0-3](?:\.\d)?)\s?(?:\"|in\b|inch|”)", t, re.I)
-    if m: return False                                  # sub-14" screen called out in the title
+    m = SCREEN_TXT.search(t)
+    if m and float(m.group(1)) < MIN_SCREEN: return False   # small screen called out in the title
+    if cosmetic_hit(t): return False                        # "scratched", "minor wear", "dent" in the title
     return True
 
 def comp_score_ebay(it, tok):
@@ -272,7 +309,11 @@ def comp_score_ebay(it, tok):
     blob = " ".join([it["title"], d.get("shortDescription") or "", d.get("conditionDescription") or "",
                      " ".join(f"{k}: {v}" for k, v in a.items()), desc_txt[:6000]])
     if JUNK.search(" ".join([it["title"], d.get("conditionDescription") or ""])): return None
-    if re.search(r"\bfor parts\b|not working|as[- ]is", d.get("condition") or "", re.I): return None
+    if re.search(r"\bfor parts\b|not working|as[- ]is|good - refurbished", d.get("condition") or "", re.I): return None
+    # Cosmetic: seller condition notes, item specifics and description all have to be clean
+    cos_txt = " ".join([it["title"], d.get("conditionDescription") or "", d.get("shortDescription") or "",
+                        a.get("cosmetic condition", ""), a.get("condition description", ""), desc_txt[:6000]])
+    if cosmetic_hit(cos_txt): return None
     # GPU
     gpu = GOOD_GPU.search(" ".join([it["title"], a.get("gpu", ""), a.get("graphics processing type", ""),
                                     a.get("graphics card", ""), d.get("shortDescription") or ""])) or GOOD_GPU.search(blob)
@@ -289,8 +330,11 @@ def comp_score_ebay(it, tok):
         ram = float(m.group(1)) if m else None
     if ram is not None and ram < MIN_RAM: return None
     # Screen
-    scr = num(a.get("screen size", ""))
-    if scr is not None and scr < MIN_SCREEN: return None
+    scr = num(a.get("screen size", "")) or num(a.get("display size", ""))
+    if scr is None or scr < 10:
+        m = SCREEN_TXT.search(it["title"]) or SCREEN_TXT.search(d.get("shortDescription") or "")
+        scr = float(m.group(1)) if m else None
+    if scr is None or scr < MIN_SCREEN: return None        # must be confirmed 15"+
     # OS
     os_txt = a.get("operating system", "")
     if re.search(r"not included|none|no os|linux|chrome|free ?dos|ubuntu", os_txt, re.I): return None
@@ -316,7 +360,6 @@ def comp_score_ebay(it, tok):
     notes = []
     if charger is None: notes.append("charger not stated: ask seller")
     if ram is None: notes.append("RAM not stated: confirm 16GB")
-    if scr is None: notes.append("confirm screen size")
     if not cpu6: notes.append("confirm CPU is 6+ cores")
     if not (win11 or win10): notes.append("confirm Windows included")
     if it.get("auction"):
@@ -325,10 +368,11 @@ def comp_score_ebay(it, tok):
                      f", {it.get('bids', 0)} bids. Max bid ${MAX_TOTAL - ship:,.0f} to stay at ${MAX_TOTAL:,.0f} delivered")
     score = (3 if pref else 1 if durable else 0) + (2 if strong else 1) + (1 if cpu6 else 0) + \
             (1 if win11 else 0) + (1 if charger else 0) + (1 if ram and ram >= 16 else 0)
-    tier = ("🏆 TOP PICK" if score >= 8 else "🎮 STRONG" if score >= 6 else "🎮 SOLID")
+    clean = not any(n for n in notes if not n.startswith("AUCTION"))  # every spec confirmed by the seller
+    tier = ("🏆 TOP PICK" if score >= 8 and clean and cpu6 else "🎮 STRONG" if score >= 6 else "🎮 SOLID")
     if it.get("auction"): tier += " · 🔨 AUCTION"
     spec = [f"**GPU** {g}", f"**CPU** {a.get('processor') or ('6+ core' if cpu6 else '?')}",
-            f"**RAM** {int(ram)}GB" if ram else "**RAM** ?", f"**Screen** {a.get('screen size') or '?'}",
+            f"**RAM** {int(ram)}GB" if ram else "**RAM** ?", f"**Screen** {a.get('screen size') or f'{scr:g} in'}",
             f"**OS** {os_txt or ('Win11' if win11 else 'Win10' if win10 else '?')}",
             f"**Brand** {brand or '?'}{(' ' + series) if series else ''}",
             f"**Charger** {charger or 'not stated'}"]
