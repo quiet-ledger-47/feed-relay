@@ -32,6 +32,7 @@ NEWISH = re.compile(r"^\s*(?:new|brand new|new other|open box|new \(other\))", r
 HEALTH_RE = re.compile(r"(?:health|capacity|condition|wear level|remaining)\D{0,20}?(\d{2,3}(?:\.\d+)?) ?%|"
                        r"(\d{2,3}(?:\.\d+)?) ?% ?(?:health|capacity|of (?:original|design)|remaining|battery health)", re.I)
 CYCLE_RE = re.compile(r"(\d{1,4}) ?(?:charge )?cycles?\b|cycle ?count\D{0,6}(\d{1,4})", re.I)
+TAX = float(os.environ.get("PARTS_TAX") or 0.06)   # est. sales tax eBay collects on item + shipping
 MIN_HEALTH, MAX_CYCLES = 85, 300               # healthy batteries only: new/open box, or seller-stated >=85% and <=300 cycles
 
 def battery_health(cond, blob):
@@ -132,8 +133,10 @@ def search(tok, part, q, auction):
         p = float(((x.get("currentBidPrice") if auc else None) or x.get("price") or {}).get("value") or 0)
         sh = None
         for so in x.get("shippingOptions") or []:
-            try: sh = float((so.get("shippingCost") or {}).get("value") or 0); break
-            except Exception: pass
+            v = (so.get("shippingCost") or {}).get("value")            # missing = calculated/unknown, NOT free
+            if v is not None:
+                try: sh = float(v); break
+                except Exception: pass
         ends = None
         try: ends = dt.datetime.fromisoformat((x.get("itemEndDate") or "").replace("Z", "+00:00"))
         except Exception: pass
@@ -177,10 +180,17 @@ def verify(part, it, tok):
         if mods and mods != want: return None
         if per and not re.search(r"\b16 ?gb\b", per, re.I): return None
         if not per and tot and not re.search(r"\b%d ?gb\b" % (16 * want), tot, re.I): return None
-    if it.get("ship") is None:
-        try: it["ship"] = float((((d.get("shippingOptions") or [{}])[0]).get("shippingCost") or {}).get("value") or 0)
-        except Exception: it["ship"] = 0.0
-    total = it["price"] + (it["ship"] or 0)
+    costs = []                                      # listing page is authoritative for shipping
+    for so in d.get("shippingOptions") or []:
+        v = (so.get("shippingCost") or {}).get("value")
+        try:
+            if v is not None: costs.append(float(v))
+        except Exception: pass
+    if costs: it["ship"] = min(costs)
+    if it.get("ship") is None: return None          # unknown shipping = no out-the-door price, skip
+    sub = it["price"] + it["ship"]
+    tax = round(sub * TAX, 2)
+    total = round(sub + tax, 2)                     # OUT THE DOOR: item + shipping + est. sales tax
     if total > part["max_total"]: return None
     cap = ""
     if part["id"] == "ext":
@@ -209,21 +219,22 @@ def verify(part, it, tok):
     if it["auction"]:
         left = (it["ends"] - NOW).total_seconds() / 3600 if it.get("ends") else None
         notes.insert(0, f"AUCTION, {it['bids']} bids" + (f", ends in {left:.0f}h" if left is not None else "") +
-                     f". Max bid ${part['max_total'] - (it['ship'] or 0):,.0f} keeps it under ${part['max_total']} delivered")
-    return {"v": 2, "total": round(total, 2), "cap": cap, "cond": cond, "notes": notes,
+                     f". Max bid ${part['max_total'] / (1 + TAX) - it['ship']:,.0f} keeps it under ${part['max_total']} out the door")
+    return {"v": 3, "total": total, "tax": tax, "ship": it["ship"], "cap": cap, "cond": cond, "notes": notes,
             "mpn": a.get("mpn") or a.get("manufacturer part number") or "", "brand": a.get("brand") or ""}
 
 def embed(part, it, v, tag):
-    f = [{"name": "Delivered", "value": f"**${v['total']:,.2f}**", "inline": True},
+    f = [{"name": "Out the door", "value": f"**${v['total']:,.2f}**", "inline": True},
          {"name": "Price", "value": f"${it['price']:,.2f}" + (" (bid)" if it["auction"] else ""), "inline": True},
          {"name": "Ship", "value": "free" if not it["ship"] else f"${it['ship']:,.2f}", "inline": True},
+         {"name": "Tax (est.)", "value": f"${v.get('tax', 0):,.2f}", "inline": True},
          {"name": "Condition", "value": v["cond"][:60] or "?", "inline": True},
          {"name": "Seller", "value": it["seller"][:80], "inline": True}]
     if v["cap"]: f.append({"name": "Capacity", "value": v["cap"], "inline": True})
     if v["mpn"] or v["brand"]: f.append({"name": "Brand / MPN", "value": f"{v['brand']} {v['mpn']}".strip()[:80], "inline": True})
     if v["notes"]: f.append({"name": "Check", "value": " · ".join(v["notes"])[:300], "inline": False})
     e = {"title": it["title"][:250], "url": it["link"], "color": 0xE5A639 if it["auction"] else 0x3987E5,
-         "author": {"name": f"{tag} · {part['label']}"}, "fields": f, "footer": {"text": "eBay · OEM filter + seller ≥98.5%"},
+         "author": {"name": f"{tag} · {part['label']}"}, "fields": f, "footer": {"text": f"Out the door = item + shipping + ~{TAX*100:.0f}% est. sales tax · eBay · seller ≥98.5%"},
          "timestamp": NOW.isoformat()}
     if (it.get("img") or "").startswith("https://"): e["thumbnail"] = {"url": it["img"]}
     return e
@@ -258,7 +269,7 @@ def run(mode):
         pc = 0
         for it in sorted(found[p["id"]], key=lambda x: x["price"] + (x["ship"] or 0)):
             cached = s["board"].get(it["id"])
-            if cached and cached.get("v") == 2 and mode == "board":     # v2 = health-gated rules
+            if cached and cached.get("v") == 3 and mode == "board":     # v3 = out-the-door totals
                 verified[p["id"]].append((it, cached)); continue
             if it["id"] in s["seen"] and mode == "scan": continue
             if checked >= GETITEM_CAP or pc >= per_part: break
@@ -296,10 +307,10 @@ def run(mode):
             else:
                 rows = rows[:2]
             lines.append(f"**{p['label']}**")
-            if not rows: lines.append("> nothing genuine under $%d right now" % p["max_total"])
+            if not rows: lines.append("> nothing genuine under $%d out the door right now" % p["max_total"])
             for it, v in rows[:3]:
                 kind = f"🔨 bid, ends {it['ends'].astimezone(ET):%a %-I%p} ET" if it["auction"] and it.get("ends") else "BIN"
-                lines.append(f"> [${v['total']:,.2f} delivered]({it['link']}) · {(v['cap'] + ' · ') if v['cap'] else ''}"
+                lines.append(f"> [${v['total']:,.2f} out the door]({it['link']}) · {(v['cap'] + ' · ') if v['cap'] else ''}"
                              f"{v['cond'][:22]} · {kind} · {it['seller'].split(' · ')[-1]}")
             if rows: s["best"][p["id"]] = rows[0][1]["total"]
         best = lambda k: min((v["total"] for _, v in verified.get(k, [])), default=None)
@@ -309,7 +320,7 @@ def run(mode):
         ext = min((v["total"] for _, v in verified["ext"]), default=0)
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
              "description": "\n".join(lines)[:3900],
-             "footer": {"text": f"Cheapest full set ≈ ${total + ext:,.2f} delivered · eBay · OEM only · seller ≥98.5%"}}
+             "footer": {"text": f"Cheapest full set ≈ ${total + ext:,.2f} out the door (item + ship + ~{TAX*100:.0f}% tax) · eBay · OEM only · seller ≥98.5%"}}
         ok = post(HOOK, {"username": "Computer Project", "avatar_url": AV, "embeds": [e]})
         log(json.dumps({"mode": "board", "ok": ok, "getitem": checked}))
         if not ok: sys.exit(1)
