@@ -648,12 +648,34 @@ def bp_rows(progs, tax):
     log(f"hotels bp: searches={len(combos)} with_results={got} props={sum(len(e[4]) for e in entries)}")
     return match_rows(entries, progs, tax) if got else []
 
+def patch_programs(progs):
+    """Optional HOTEL_PATCH secret: [{"re": <matches id or label>, "drop": true} | {"re": ..., "set": {key: value|null}}]."""
+    try: patches = json.loads(os.environ.get("HOTEL_PATCH") or "[]")
+    except Exception: patches = []
+    out = []
+    for p in progs:
+        p = dict(p); tag = str(p.get("id", "")) + " " + str(p.get("label", "")); drop = False
+        for pt in patches:
+            if not re.search(pt.get("re") or r"(?!x)x", tag, re.I): continue
+            if pt.get("drop"): drop = True
+            for k, v in (pt.get("set") or {}).items():
+                if v is None: p.pop(k, None)
+                else: p[k] = v
+        if not drop: out.append(p)
+    if patches: log(f"hotels: patch applied, programs {len(progs)}->{len(out)}")
+    return out
+
+def scope(rows, progs):
+    """Per-program city scope: a program with "cities_re" only keeps rows whose city label matches."""
+    cre = {p["id"]: re.compile(p["cities_re"], re.I) for p in progs if p.get("cities_re")}
+    return [r for r in rows if r["pid"] not in cre or cre[r["pid"]].search(r.get("city") or "")]
+
 def run_hotels():
     """Blue Pillow (live multi-OTA) first; programs it can't fill (luxury FHR/Edit lists) fall back to Xotelo, then SerpApi."""
     if not H.get("geos"): log("hotels: no config"); return
     os.makedirs("state", exist_ok=True)                                 # cache dir for the workflow's actions/cache
-    tax = float(H.get("tax") or 1.15); progs = H.get("programs") or []
-    rows = bp_rows(progs, tax)
+    tax = float(H.get("tax") or 1.15); progs = H.get("programs") or []; progs = patch_programs(progs)
+    rows = scope(bp_rows(progs, tax), progs)
     have = {}
     cap = H.get("max_oop", 150); certs = {p["id"] for p in progs if p.get("cert")}
     for r in rows:
@@ -661,7 +683,7 @@ def run_hotels():
     missing = [p for p in progs if have.get(p["id"], 0) < int(H.get("min_rows", 3))]
     if missing:
         log("hotels: filling " + ",".join(p["id"] for p in missing) + " from fallback sources")
-        rows += xotelo_rows(missing, tax)
+        rows += scope(xotelo_rows(missing, tax), progs)
     if len(rows) < 5:
         # every source down: don't overwrite the channel with an empty board
         log("hotels: no usable prices from any source - skipping post"); sys.exit(1)
