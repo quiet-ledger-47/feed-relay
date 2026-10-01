@@ -28,6 +28,22 @@ JUNK = re.compile(r"for parts|not working|as[- ]is|\bdead\b|\bswollen\b|\bbulg|\
                   r"\b\d+ ?(?:pcs|pack)\b|\bwholesale\b|\bempty\b|\bshell\b|\bcase only\b|\bdummy\b|\bfiller\b|"
                   r"\bblank\b|\bcover\b(?! included)", re.I)
 BAD_SELLER_COND = re.compile(r"\bfor parts\b|not working", re.I)
+NEWISH = re.compile(r"^\s*(?:new|brand new|new other|open box|new \(other\))", re.I)
+HEALTH_RE = re.compile(r"(?:health|capacity|condition|wear level|remaining)\D{0,20}?(\d{2,3}(?:\.\d+)?) ?%|"
+                       r"(\d{2,3}(?:\.\d+)?) ?% ?(?:health|capacity|of (?:original|design)|remaining|battery health)", re.I)
+CYCLE_RE = re.compile(r"(\d{1,4}) ?(?:charge )?cycles?\b|cycle ?count\D{0,6}(\d{1,4})", re.I)
+MIN_HEALTH, MAX_CYCLES = 85, 300               # healthy batteries only: new/open box, or seller-stated >=85% and <=300 cycles
+
+def battery_health(cond, blob):
+    """None = reject. Else a short note for the alert."""
+    hs = [float(a or b) for a, b in HEALTH_RE.findall(blob) if 0 < float(a or b) <= 100]
+    cs = [int(a or b) for a, b in CYCLE_RE.findall(blob)]
+    if hs and min(hs) < MIN_HEALTH: return None
+    if cs and max(cs) > MAX_CYCLES: return None
+    if NEWISH.search(cond or "") and not re.search(r"refurb|used|pre-?owned", cond or "", re.I):
+        return "new / open box" + (f" · {min(hs):.0f}% health" if hs else "")
+    if not hs: return None                     # used with no stated health = unknown wear, skip
+    return f"used · {min(hs):.0f}% health" + (f" · {max(cs)} cycles" if cs else "")
 
 INTERNAL_FRU = r"01AV419|01AV420|01AV421|01AV489|SB10K9757[678]"
 EXT24_FRU = r"01AV422|01AV423|01AV424|01AV452|SB10K9757[9]|SB10K9758[01]|4X50M08810"
@@ -39,11 +55,12 @@ PARTS = [
      "q": ["01AV421 battery", "01AV420 battery", "01AV419 battery", "01AV489 battery", "t480 internal battery genuine",
            "thinkpad t480 internal battery oem"],
      "must": INTERNAL_FRU, "brand": "lenovo", "battery": True},
-    {"id": "ext", "label": "External battery (rear 61 / 61+ / 61++)", "cat": "14295", "max_total": 95,
-     "q": ["01AV427 battery", "01AV428 battery", "01AV422 battery", "01AV423 battery", "01AV424 battery",
-           "4X50M08812", "4X50M08810", "thinkpad t480 battery 72wh genuine", "thinkpad t480 61++ battery",
-           "t480 rear battery genuine", "thinkpad t480 external battery oem"],
-     "must": "|".join([EXT24_FRU, EXT48_FRU, EXT72_FRU]), "brand": "lenovo", "battery": True},
+    {"id": "ext", "label": "External battery 72Wh (rear 61++)", "cat": "14295", "max_total": 95,
+     "q": ["01AV427 battery", "01AV428 battery", "01AV492 battery", "4X50M08812", "SB10K97584", "SB10K97585",
+           "thinkpad t480 battery 72wh genuine", "thinkpad t480 61++ battery", "lenovo 61++ 72wh battery"],
+     "must": EXT72_FRU + r"|(?=.*\b7[0-2] ?wh\b)(?=.*61\+\+)",
+     "exclude": EXT24_FRU + "|" + EXT48_FRU + r"|\b(?:2[34]|4[78]) ?wh\b|61\+(?!\+)",
+     "brand": "lenovo", "battery": True},
     {"id": "scr", "label": "Smart card reader (00HW553)", "cat": "31530", "max_total": 35,
      "q": ["00HW553", "t480 smart card reader", "t470 smart card reader", "thinkpad t480 smartcard reader"],
      "must": r"00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank",
@@ -173,8 +190,10 @@ def verify(part, it, tok):
                "24Wh 61" if re.search(r"\b2[34] ?wh\b|" + EXT24_FRU, blob, re.I) else "capacity ?")
     notes = []
     cond = d.get("condition") or it["cond"]
-    if part["battery"] and re.search(r"used|pre-?owned", cond, re.I):
-        notes.append("used battery: ask for cycle count / wear level")
+    if part["battery"]:
+        hn = battery_health(cond, " ".join([it["title"], notes_txt, desc]))
+        if hn is None: return None
+        notes.append(hn)
     if part["battery"] and re.search(r"\bnew\b", cond, re.I) and not re.search(r"20(?:2[2-9])", desc + it["title"]):
         notes.append("new-old-stock: ask manufacture date")
     if part["id"] == "ram":
@@ -191,7 +210,7 @@ def verify(part, it, tok):
         left = (it["ends"] - NOW).total_seconds() / 3600 if it.get("ends") else None
         notes.insert(0, f"AUCTION, {it['bids']} bids" + (f", ends in {left:.0f}h" if left is not None else "") +
                      f". Max bid ${part['max_total'] - (it['ship'] or 0):,.0f} keeps it under ${part['max_total']} delivered")
-    return {"total": round(total, 2), "cap": cap, "cond": cond, "notes": notes,
+    return {"v": 2, "total": round(total, 2), "cap": cap, "cond": cond, "notes": notes,
             "mpn": a.get("mpn") or a.get("manufacturer part number") or "", "brand": a.get("brand") or ""}
 
 def embed(part, it, v, tag):
@@ -239,7 +258,7 @@ def run(mode):
         pc = 0
         for it in sorted(found[p["id"]], key=lambda x: x["price"] + (x["ship"] or 0)):
             cached = s["board"].get(it["id"])
-            if cached and mode == "board":
+            if cached and cached.get("v") == 2 and mode == "board":     # v2 = health-gated rules
                 verified[p["id"]].append((it, cached)); continue
             if it["id"] in s["seen"] and mode == "scan": continue
             if checked >= GETITEM_CAP or pc >= per_part: break
