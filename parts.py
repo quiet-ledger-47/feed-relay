@@ -210,17 +210,19 @@ def run(mode):
     if not HOOK: log("parts: PARTS_HOOK not set"); sys.exit(1)
     s = load(); first = not s["seen"]
     global GETITEM_CAP
-    if mode == "board": GETITEM_CAP = 60
+    if mode == "board": GETITEM_CAP = 100
+    per_part = 14 if mode == "board" else 3              # every part gets its share; big result sets can't starve the rest
     tok, found = gather(full=(mode == "board"))
     checked, verified, posts = 0, {p["id"]: [] for p in PARTS}, []
     for p in PARTS:
+        pc = 0
         for it in sorted(found[p["id"]], key=lambda x: x["price"] + (x["ship"] or 0)):
             cached = s["board"].get(it["id"])
             if cached and mode == "board":
                 verified[p["id"]].append((it, cached)); continue
             if it["id"] in s["seen"] and mode == "scan": continue
-            if checked >= GETITEM_CAP: break
-            checked += 1
+            if checked >= GETITEM_CAP or pc >= per_part: break
+            checked += 1; pc += 1
             v = verify(p, it, tok); time.sleep(0.2)
             s["seen"][it["id"]] = NOW.timestamp()
             if not v: continue
