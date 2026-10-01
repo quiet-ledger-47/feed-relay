@@ -34,7 +34,7 @@ jobs:
           MODE: ${{ github.event.inputs.mode || (github.event.schedule == '5 12 * * *' && 'board') || 'loop' }}
         run: |
           mkdir -p state
-          board() { m="state/board-$(date -u +%Y%m%d)"; [ -f "$m" ] && return 0; python3 parts.py board && touch "$m"; }
+          board() { m="state/board-v4-$(date -u +%Y%m%d)"; [ -f "$m" ] && return 0; python3 parts.py board && touch "$m"; }
           if [ "$MODE" = loop ]; then
             end=$(( $(date +%s) + 330*60 ))
             while [ "$(date +%s)" -lt "$end" ]; do
