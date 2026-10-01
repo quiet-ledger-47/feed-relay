@@ -1,12 +1,12 @@
 name: parts
 on:
   schedule:
-    - cron: "3-59/15 * * * *"   # scan every 15 min (rotating query slice, full list ~hourly)
-    - cron: "5 12 * * *"        # board: best price per part, once a day (full sweep)
+    - cron: "7 */4 * * *"   # starts a ~5.5h in-job loop (scan every 15 min); GitHub's own */15 cron was firing only every 4-6h
+    - cron: "5 12 * * *"    # board fallback (the loop also posts the board once a day after 12:00 UTC)
   workflow_dispatch:
     inputs:
       mode:
-        description: scan or board
+        description: loop, scan or board
         default: board
 permissions:
   contents: read
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v5
         with:
@@ -31,8 +31,19 @@ jobs:
           PARTS_HOOK: ${{ secrets.PARTS_HOOK }}
           EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
-          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '5 12 * * *' && 'board') || 'scan' }}
-        run: python3 parts.py "$MODE"
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '5 12 * * *' && 'board') || 'loop' }}
+        run: |
+          mkdir -p state
+          board() { m="state/board-$(date -u +%Y%m%d)"; [ -f "$m" ] && return 0; python3 parts.py board && touch "$m"; }
+          if [ "$MODE" = loop ]; then
+            end=$(( $(date +%s) + 330*60 ))
+            while [ "$(date +%s)" -lt "$end" ]; do
+              [ "$(date -u +%H)" -ge 12 ] && { board || true; }
+              python3 parts.py scan || echo "scan failed, retry next cycle"
+              sleep 900
+            done
+          elif [ "$MODE" = board ]; then board
+          else python3 parts.py "$MODE"; fi
       - uses: actions/cache/save@v5
         if: always()
         with:
