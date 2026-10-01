@@ -52,7 +52,7 @@ EXT48_FRU = r"01AV425|01AV426|01AV490|01AV491|SB10K9758[23]|4X50M08811"
 EXT72_FRU = r"01AV427|01AV428|01AV492|SB10K9758[45]|4X50M08812"
 
 PARTS = [
-    {"id": "int", "label": "Internal battery (front, 24Wh)", "cat": "14295", "max_total": 60,
+    {"id": "int", "label": "Internal battery (front, 24Wh)", "cat": "14295", "max_total": 60, "off": True,   # bought 2026-10-01 (eBay 326789115044)
      "q": ["01AV421 battery", "01AV420 battery", "01AV419 battery", "01AV489 battery", "t480 internal battery genuine",
            "thinkpad t480 internal battery oem"],
      "must": INTERNAL_FRU, "brand": "lenovo", "battery": True},
