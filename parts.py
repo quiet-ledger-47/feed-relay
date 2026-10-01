@@ -63,12 +63,12 @@ PARTS = [
      "must": r"(?=.*(?:ADLX65Y[LCD]C[23]A|01FR02[4-7]|01FR030|SA10M1394[5-8]|4X20M26272|65 ?w))(?=.*(?:usb[- ]?c|type[- ]?c|ADLX65Y))",
      "exclude": r"\b(?:45|90|95|100|135|170|230) ?w\b|slim tip|square tip|rectangular|dock|cable only|car charger",
      "brand": "lenovo", "battery": False},
-    {"id": "wifi", "label": "Wi-Fi card (Intel AX210, M.2 2230)", "cat": "175710", "max_total": 25, "oem": False,
+    {"id": "wifi", "label": "Wi-Fi card (Intel AX210, M.2 2230)", "cat": None, "max_total": 30, "oem": False,
      "q": ["intel ax210ngw", "intel ax210 m.2 2230", "ax210ngw wifi 6e card", "intel wi-fi 6e ax210 2230"],
      "must": r"(?=.*ax210)(?=.*(?:ngw|m\.?2|2230|ngff))", "brands": r"intel",
      "exclude": r"desktop|pci-?e x1|pcie card|\badapter\b|antenna kit|with antennas?|\bkit\b|usb|vpro|ax211|cnvio",
      "brand": None, "battery": False},
-    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": "31530", "max_total": 30,
+    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40,
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
      "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
      "exclude": r"\bt480s\b|\bt580\b|\bl[45]80\b|\be480\b|01YN09[67]|palm ?rest|keyboard|touchpad|cable only",
@@ -86,7 +86,7 @@ def save(s):
     os.makedirs("state", exist_ok=True); json.dump(s, open(STATE, "w"))
 
 def search(tok, part, q, auction):
-    qs = urllib.parse.urlencode({"q": q, "category_ids": part["cat"], "limit": "100",
+    qs = urllib.parse.urlencode({"q": q, **({"category_ids": part["cat"]} if part.get("cat") else {}), "limit": "100",
         "sort": "endingSoonest" if auction else "price",
         "filter": f"price:[1..{part['max_total']}],priceCurrency:USD,itemLocationCountry:US,"
                   "conditionIds:{1000|1500|2000|2010|2020|2500|3000},"
