@@ -53,7 +53,8 @@ PARTS = [
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
      "must": r"(?=.*\b16 ?gb\b)(?=.*(?:ddr4|pc4))(?=.*(?:so-?dimm|sodimm|laptop|notebook|260[- ]?pin))",
-     "exclude": r"\b(?:2|4) ?x ?(?:8|16) ?gb\b|\b32 ?gb\b|\bkit\b|\becc\b|\bregistered\b|\brdimm\b|\budimm\b|"
+     "exclude": r"\b[24] ?x ?(?:4|8|16) ?gb\b|\b(?:4|8|16) ?gb ?x ?[24]\b|\b(?:4|8) ?gb\b|\b32 ?gb\b|\bkit\b|\bpair\b|"
+                r"\b[2-9] ?(?:pcs|pieces|sticks|modules)\b|\bset of\b|\becc\b|\bregistered\b|\brdimm\b|\budimm\b|"
                 r"\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
      "brand": None, "battery": False},
@@ -68,12 +69,14 @@ PARTS = [
      "must": r"(?=.*ax210)(?=.*(?:ngw|m\.?2|2230|ngff))", "brands": r"intel",
      "exclude": r"desktop|pci-?e x1|pcie card|\badapter\b|antenna kit|with antennas?|\bkit\b|usb|vpro|ax211|cnvio",
      "brand": None, "battery": False},
-    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40,
+    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # unit already has one
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
      "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
      "exclude": r"\bt480s\b|\bt580\b|\bl[45]80\b|\be480\b|01YN09[67]|palm ?rest|keyboard|touchpad|cable only",
      "brand": None, "battery": False},
 ]
+
+PARTS = [p for p in PARTS if not p.get("off")]      # parked watches stay defined so they can be switched back on
 
 
 def load():
@@ -141,6 +144,9 @@ def verify(part, it, tok):
         if mb and not re.search(part["brands"], mb, re.I): return None
         spd = " ".join([a.get("bus speed", ""), a.get("speed", ""), it["title"]])
         if re.search(r"\b(?:2133|1866|1600)\b", spd): return None                # too slow for the T480's 2400 bus
+        mods = num(a.get("number of modules", ""))                               # ONE 16GB stick only, never a kit
+        per = a.get("capacity per module", "") or a.get("total capacity", "")
+        if (mods and mods != 1) or (per and not re.search(r"\b16 ?gb\b", per, re.I)): return None
     if it.get("ship") is None:
         try: it["ship"] = float((((d.get("shippingOptions") or [{}])[0]).get("shippingCost") or {}).get("value") or 0)
         except Exception: it["ship"] = 0.0
