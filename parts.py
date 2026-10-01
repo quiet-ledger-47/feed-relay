@@ -56,7 +56,7 @@ PARTS = [
      "q": ["01AV421 battery", "01AV420 battery", "01AV419 battery", "01AV489 battery", "t480 internal battery genuine",
            "thinkpad t480 internal battery oem"],
      "must": INTERNAL_FRU, "brand": "lenovo", "battery": True},
-    {"id": "ext", "label": "External battery 72Wh (rear 61++)", "cat": "14295", "max_total": 95,
+    {"id": "ext", "label": "External battery 72Wh (rear 61++)", "cat": "14295", "max_total": 95, "off": True,   # bought 2026-10-01 (eBay 287613298944)
      "q": ["01AV427 battery", "01AV428 battery", "01AV492 battery", "4X50M08812", "SB10K97584", "SB10K97585",
            "thinkpad t480 battery 72wh genuine", "thinkpad t480 61++ battery", "lenovo 61++ 72wh battery"],
      "must": EXT72_FRU + r"|(?=.*\b7[0-2] ?wh\b)(?=.*61\+\+)",
