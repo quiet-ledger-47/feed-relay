@@ -1,0 +1,40 @@
+name: parts
+on:
+  schedule:
+    - cron: "7 * * * *"     # scan: new listings that pass every rule
+    - cron: "5 12 * * *"    # board: best price per part, once a day
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: scan or board
+        default: board
+permissions:
+  contents: read
+concurrency:
+  group: parts
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@v5
+        with:
+          path: state
+          key: p-${{ github.run_id }}
+          restore-keys: p-
+      - name: Run
+        env:
+          PARTS_HOOK: ${{ secrets.PARTS_HOOK }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          MODE: ${{ github.event.inputs.mode || (github.event.schedule == '5 12 * * *' && 'board') || 'scan' }}
+        run: python3 parts.py "$MODE"
+      - uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: state
+          key: p-${{ github.run_id }}
