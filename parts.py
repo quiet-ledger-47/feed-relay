@@ -48,7 +48,7 @@ PARTS = [
      "q": ["00HW553", "t480 smart card reader", "t470 smart card reader", "thinkpad t480 smartcard reader"],
      "must": r"00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank",
      "brand": None, "battery": False},
-    {"id": "ram", "label": "16GB DDR4 SO-DIMM (one stick)", "cat": "170083", "max_total": 45,
+    {"id": "ram", "label": "16GB DDR4 SO-DIMM (single stick, buy 2)", "cat": "170083", "max_total": 45, "mods": 1,
      "q": ["16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
@@ -56,6 +56,16 @@ PARTS = [
      "exclude": r"\b[24] ?x ?(?:4|8|16) ?gb\b|\b(?:4|8|16) ?gb ?x ?[24]\b|\b(?:4|8) ?gb\b|\b32 ?gb\b|\bkit\b|\bpair\b|"
                 r"\b[2-9] ?(?:pcs|pieces|sticks|modules)\b|\bset of\b|\becc\b|\bregistered\b|\brdimm\b|\budimm\b|"
                 r"\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
+     "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
+     "brand": None, "battery": False},
+    {"id": "ram2", "label": "32GB DDR4 SO-DIMM kit (2x16GB)", "cat": "170083", "max_total": 85, "mods": 2,
+     "q": ["2x16gb ddr4 sodimm", "32gb 2x16gb ddr4 2400 sodimm", "32gb 2x16gb ddr4 2666 sodimm",
+           "32gb 2x16gb ddr4 3200 sodimm", "32gb kit ddr4 sodimm laptop", "crucial 32gb kit 2x16gb ddr4 sodimm",
+           "samsung 2x16gb ddr4 sodimm", "sk hynix 2x16gb ddr4 sodimm", "kingston 32gb kit 2x16gb ddr4 sodimm"],
+     "must": r"(?=.*(?:\b2 ?x ?16 ?gb\b|\b16 ?gb ?x ?2\b|\b32 ?gb\b.*\b(?:kit|2 ?x|pair|2 ?pcs)\b))(?=.*(?:ddr4|pc4))"
+             r"(?=.*(?:so-?dimm|sodimm|laptop|notebook|260[- ]?pin))",
+     "exclude": r"\b(?:1 ?x ?32|32 ?gb ?x ?1)\b|\b4 ?x ?(?:8|16) ?gb\b|\b(?:8|16) ?gb ?x ?4\b|\b2 ?x ?8 ?gb\b|\b64 ?gb\b|"
+                r"\becc\b|\bregistered\b|\brdimm\b|\budimm\b|\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
      "brand": None, "battery": False},
     {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 25,
@@ -69,7 +79,7 @@ PARTS = [
      "must": r"(?=.*ax210)(?=.*(?:ngw|m\.?2|2230|ngff))", "brands": r"intel",
      "exclude": r"desktop|pci-?e x1|pcie card|\badapter\b|antenna kit|with antennas?|\bkit\b|usb|vpro|ax211|cnvio",
      "brand": None, "battery": False},
-    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # unit already has one
+    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # his unit has no reader + blank palm rest: needs FPR palm rest too
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
      "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
      "exclude": r"\bt480s\b|\bt580\b|\bl[45]80\b|\be480\b|01YN09[67]|palm ?rest|keyboard|touchpad|cable only",
@@ -144,9 +154,12 @@ def verify(part, it, tok):
         if mb and not re.search(part["brands"], mb, re.I): return None
         spd = " ".join([a.get("bus speed", ""), a.get("speed", ""), it["title"]])
         if re.search(r"\b(?:2133|1866|1600)\b", spd): return None                # too slow for the T480's 2400 bus
-        mods = num(a.get("number of modules", ""))                               # ONE 16GB stick only, never a kit
-        per = a.get("capacity per module", "") or a.get("total capacity", "")
-        if (mods and mods != 1) or (per and not re.search(r"\b16 ?gb\b", per, re.I)): return None
+        want = part.get("mods", 1)                                               # single stick or 2x16 kit, never 4x/2x8
+        mods = num(a.get("number of modules", ""))
+        per, tot = a.get("capacity per module", ""), a.get("total capacity", "")
+        if mods and mods != want: return None
+        if per and not re.search(r"\b16 ?gb\b", per, re.I): return None
+        if not per and tot and not re.search(r"\b%d ?gb\b" % (16 * want), tot, re.I): return None
     if it.get("ship") is None:
         try: it["ship"] = float((((d.get("shippingOptions") or [{}])[0]).get("shippingCost") or {}).get("value") or 0)
         except Exception: it["ship"] = 0.0
@@ -165,7 +178,9 @@ def verify(part, it, tok):
     if part["battery"] and re.search(r"\bnew\b", cond, re.I) and not re.search(r"20(?:2[2-9])", desc + it["title"]):
         notes.append("new-old-stock: ask manufacture date")
     if part["id"] == "ram":
-        notes.append("confirm your current RAM is ONE 16GB stick (2 slots, 32GB max)")
+        notes.append("unit has 2x8GB, both slots full: buy TWO for 32GB (one = 24GB)")
+    if part["id"] == "ram2":
+        notes.append("replaces both 8GB sticks: 32GB dual-channel")
     if part["id"] == "scr":
         notes.append("needs the reader-to-board cable: confirm included")
     if part["id"] == "fpr":
@@ -268,7 +283,10 @@ def run(mode):
                 lines.append(f"> [${v['total']:,.2f} delivered]({it['link']}) · {(v['cap'] + ' · ') if v['cap'] else ''}"
                              f"{v['cond'][:22]} · {kind} · {it['seller'].split(' · ')[-1]}")
             if rows: s["best"][p["id"]] = rows[0][1]["total"]
-        total = sum(min((v["total"] for _, v in verified[p["id"]]), default=0) for p in PARTS if p["id"] != "ext")  # incl. charger/wifi/fpr
+        best = lambda k: min((v["total"] for _, v in verified.get(k, [])), default=None)
+        total = sum(best(p["id"]) or 0 for p in PARTS if p["id"] not in ("ext", "ram", "ram2"))
+        r1, r2 = best("ram"), best("ram2")             # 32GB = two single sticks or one 2x16 kit, whichever is cheaper
+        total += min([x for x in ((r1 * 2) if r1 else None, r2) if x] or [0])
         ext = min((v["total"] for _, v in verified["ext"]), default=0)
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
              "description": "\n".join(lines)[:3900],
