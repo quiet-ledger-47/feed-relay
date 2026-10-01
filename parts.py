@@ -33,7 +33,7 @@ HEALTH_RE = re.compile(r"(?:health|capacity|condition|wear level|remaining)\D{0,
                        r"(\d{2,3}(?:\.\d+)?) ?% ?(?:health|capacity|of (?:original|design)|remaining|battery health)", re.I)
 CYCLE_RE = re.compile(r"(\d{1,4}) ?(?:charge )?cycles?\b|cycle ?count\D{0,6}(\d{1,4})", re.I)
 TAX = float(os.environ.get("PARTS_TAX") or 0.06)   # est. sales tax eBay collects on item + shipping
-MIN_HEALTH, MAX_CYCLES = 85, 300               # healthy batteries only: new/open box, or seller-stated >=85% and <=300 cycles
+MIN_HEALTH, MAX_CYCLES = 75, 500               # usable for 1-2 more years: reject only stated <75% health or >500 cycles
 
 def battery_health(cond, blob):
     """None = reject. Else a short note for the alert."""
@@ -43,7 +43,7 @@ def battery_health(cond, blob):
     if cs and max(cs) > MAX_CYCLES: return None
     if NEWISH.search(cond or "") and not re.search(r"refurb|used|pre-?owned", cond or "", re.I):
         return "new / open box" + (f" · {min(hs):.0f}% health" if hs else "")
-    if not hs: return None                     # used with no stated health = unknown wear, skip
+    if not hs: return "used · health not stated, ask seller (want ≥75%)" + (f" · {max(cs)} cycles" if cs else "")
     return f"used · {min(hs):.0f}% health" + (f" · {max(cs)} cycles" if cs else "")
 
 INTERNAL_FRU = r"01AV419|01AV420|01AV421|01AV489|SB10K9757[678]"
@@ -220,7 +220,7 @@ def verify(part, it, tok):
         left = (it["ends"] - NOW).total_seconds() / 3600 if it.get("ends") else None
         notes.insert(0, f"AUCTION, {it['bids']} bids" + (f", ends in {left:.0f}h" if left is not None else "") +
                      f". Max bid ${part['max_total'] / (1 + TAX) - it['ship']:,.0f} keeps it under ${part['max_total']} out the door")
-    return {"v": 3, "total": total, "tax": tax, "ship": it["ship"], "cap": cap, "cond": cond, "notes": notes,
+    return {"v": 4, "total": total, "tax": tax, "ship": it["ship"], "cap": cap, "cond": cond, "notes": notes,
             "mpn": a.get("mpn") or a.get("manufacturer part number") or "", "brand": a.get("brand") or ""}
 
 def embed(part, it, v, tag):
@@ -269,7 +269,7 @@ def run(mode):
         pc = 0
         for it in sorted(found[p["id"]], key=lambda x: x["price"] + (x["ship"] or 0)):
             cached = s["board"].get(it["id"])
-            if cached and cached.get("v") == 3 and mode == "board":     # v3 = out-the-door totals
+            if cached and cached.get("v") == 4 and mode == "board":     # v4 = out-the-door + usable-battery rules
                 verified[p["id"]].append((it, cached)); continue
             if it["id"] in s["seen"] and mode == "scan": continue
             if checked >= GETITEM_CAP or pc >= per_part: break
