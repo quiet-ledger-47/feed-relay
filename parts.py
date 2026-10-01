@@ -14,7 +14,8 @@ STATE = "state/parts.json"
 AV = "https://cdn.jsdelivr.net/gh/jdecked/twemoji@latest/assets/72x72/1f527.png"
 MIN_FB, MIN_FB_N = 98.5, 100            # reputable sellers only
 AUCTION_WINDOW_H = 48                   # surface auctions in their last 48h
-GETITEM_CAP = 40                        # per run, all parts combined
+GETITEM_CAP = int(os.environ.get("PARTS_GETITEM_CAP", 10))   # per scan run; board runs get 60
+SCAN_SLICE = 16                          # search calls per 15-min scan; full list cycles every ~90 min (eBay quota shared with the laptop hunter)
 
 # Aftermarket listings almost always say one of these. A genuine part may still say "replacement" in the sense of
 # "replacement part", so that word is only fatal next to compatible/for-brand wording.
@@ -55,6 +56,22 @@ PARTS = [
      "exclude": r"\b(?:2|4) ?x ?(?:8|16) ?gb\b|\b32 ?gb\b|\bkit\b|\becc\b|\bregistered\b|\brdimm\b|\budimm\b|"
                 r"\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
+     "brand": None, "battery": False},
+    {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 25,
+     "q": ["ADLX65YLC3A", "ADLX65YLC2A", "ADLX65YCC3A", "01FR024 charger", "01FR025 charger", "4X20M26272",
+           "genuine lenovo 65w usb-c charger", "lenovo thinkpad usb-c 65w adapter oem"],
+     "must": r"(?=.*(?:ADLX65Y[LCD]C[23]A|01FR02[4-7]|01FR030|SA10M1394[5-8]|4X20M26272|65 ?w))(?=.*(?:usb[- ]?c|type[- ]?c|ADLX65Y))",
+     "exclude": r"\b(?:45|90|95|100|135|170|230) ?w\b|slim tip|square tip|rectangular|dock|cable only|car charger",
+     "brand": "lenovo", "battery": False},
+    {"id": "wifi", "label": "Wi-Fi card (Intel AX210, M.2 2230)", "cat": "175710", "max_total": 25, "oem": False,
+     "q": ["intel ax210ngw", "intel ax210 m.2 2230", "ax210ngw wifi 6e card", "intel wi-fi 6e ax210 2230"],
+     "must": r"(?=.*ax210)(?=.*(?:ngw|m\.?2|2230|ngff))", "brands": r"intel",
+     "exclude": r"desktop|pci-?e x1|pcie card|\badapter\b|antenna kit|with antennas?|\bkit\b|usb|vpro|ax211|cnvio",
+     "brand": None, "battery": False},
+    {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": "31530", "max_total": 30,
+     "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
+     "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
+     "exclude": r"\bt480s\b|\bt580\b|\bl[45]80\b|\be480\b|01YN09[67]|palm ?rest|keyboard|touchpad|cable only",
      "brand": None, "battery": False},
 ]
 
@@ -145,6 +162,10 @@ def verify(part, it, tok):
         notes.append("confirm your current RAM is ONE 16GB stick (2 slots, 32GB max)")
     if part["id"] == "scr":
         notes.append("needs the reader-to-board cable: confirm included")
+    if part["id"] == "fpr":
+        notes.append("confirm your palm rest has the fingerprint opening (non-FPR units use a blank)")
+    if part["id"] == "wifi":
+        notes.append("T480 has no Wi-Fi whitelist; reuse your 2 antenna leads (MHF4)")
     if it["auction"]:
         left = (it["ends"] - NOW).total_seconds() / 3600 if it.get("ends") else None
         notes.insert(0, f"AUCTION, {it['bids']} bids" + (f", ends in {left:.0f}h" if left is not None else "") +
@@ -167,26 +188,30 @@ def embed(part, it, v, tag):
     if (it.get("img") or "").startswith("https://"): e["thumbnail"] = {"url": it["img"]}
     return e
 
-def gather():
+def gather(full=False):
     tok = ebay_token()
     if not tok: log("parts: no eBay token"); sys.exit(1)
     found = {p["id"]: [] for p in PARTS}
     seen_ids = set()
-    for p in PARTS:
-        for q in p["q"]:
-            for auc in (False, True):
-                for it in search(tok, p, q, auc):
-                    if it["id"] in seen_ids or not title_ok(p, it): continue
-                    if auc and (not it["ends"] or (it["ends"] - NOW).total_seconds() > AUCTION_WINDOW_H * 3600
-                                or it["ends"] <= NOW): continue
-                    seen_ids.add(it["id"]); found[p["id"]].append(it)
-                time.sleep(0.25)
+    jobs = [(p, q, auc) for p in PARTS for q in p["q"] for auc in (False, True)]
+    if not full:                                    # frequent scans rotate through the list (eBay daily call quota)
+        n = min(SCAN_SLICE, len(jobs)); start = (int(NOW.timestamp() // 900) * n) % len(jobs)
+        jobs = [jobs[(start + i) % len(jobs)] for i in range(n)]
+    for p, q, auc in jobs:
+        for it in search(tok, p, q, auc):
+            if it["id"] in seen_ids or not title_ok(p, it): continue
+            if auc and (not it["ends"] or (it["ends"] - NOW).total_seconds() > AUCTION_WINDOW_H * 3600
+                        or it["ends"] <= NOW): continue
+            seen_ids.add(it["id"]); found[p["id"]].append(it)
+        time.sleep(0.25)
     return tok, found
 
 def run(mode):
     if not HOOK: log("parts: PARTS_HOOK not set"); sys.exit(1)
     s = load(); first = not s["seen"]
-    tok, found = gather()
+    global GETITEM_CAP
+    if mode == "board": GETITEM_CAP = 60
+    tok, found = gather(full=(mode == "board"))
     checked, verified, posts = 0, {p["id"]: [] for p in PARTS}, []
     for p in PARTS:
         for it in sorted(found[p["id"]], key=lambda x: x["price"] + (x["ship"] or 0)):
@@ -235,7 +260,7 @@ def run(mode):
                 lines.append(f"> [${v['total']:,.2f} delivered]({it['link']}) · {(v['cap'] + ' · ') if v['cap'] else ''}"
                              f"{v['cond'][:22]} · {kind} · {it['seller'].split(' · ')[-1]}")
             if rows: s["best"][p["id"]] = rows[0][1]["total"]
-        total = sum(min((v["total"] for _, v in verified[p["id"]]), default=0) for p in PARTS if p["id"] != "ext")
+        total = sum(min((v["total"] for _, v in verified[p["id"]]), default=0) for p in PARTS if p["id"] != "ext")  # incl. charger/wifi/fpr
         ext = min((v["total"] for _, v in verified["ext"]), default=0)
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
              "description": "\n".join(lines)[:3900],
