@@ -1,8 +1,8 @@
 name: parts
 on:
   schedule:
-    - cron: "7 * * * *"     # scan: new listings that pass every rule
-    - cron: "5 12 * * *"    # board: best price per part, once a day
+    - cron: "3-59/15 * * * *"   # scan every 15 min (rotating query slice, full list ~hourly)
+    - cron: "5 12 * * *"        # board: best price per part, once a day (full sweep)
   workflow_dispatch:
     inputs:
       mode:
