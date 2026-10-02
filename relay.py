@@ -567,6 +567,13 @@ def serp_rows(progs, tax):
     log(f"hotels serp: searches_used={min(budget, len(todo))} cached_combos={len(cache)} rows={len(rows)}")
     return rows
 
+def extras(row, p):
+    """Optional per-program extras: "alt_credit" (smaller credit set, e.g. when a periodic credit is spent)
+    and "points_cpp" (cents/point to cover the remainder) -> alt_oop / pts on the row."""
+    if p.get("alt_credit"): row["alt_oop"] = max(round(row["total"] - float(p["alt_credit"])), 0)
+    if p.get("points_cpp") and row["oop"] > 0: row["pts"] = int(-(-row["oop"] * 100 // float(p["points_cpp"])))
+    return row
+
 def match_rows(entries, progs, tax):
     """entries: (city, nights, check_in, check_out, [props], key_prefix) -> one row per (property, program, window)."""
     rows = []
@@ -583,8 +590,8 @@ def match_rows(entries, progs, tax):
                 credit = total if p.get("cert") else float(p.get("credit", 0))
                 stack = bool(p.get("bonus_re") and re.search(p["bonus_re"], h["name"], re.I))
                 if stack: credit += float(p.get("bonus_credit", 0))
-                rows.append({**h, "key": pre + str(h["token"]), "city": v["city"], "pid": p["id"], "ci": ci_d, "co": co_d,
-                             "n": v["n"], "total": total, "stack": stack, "credit": credit, "oop": max(round(total - credit), 0)})
+                rows.append(extras({**h, "key": pre + str(h["token"]), "city": v["city"], "pid": p["id"], "ci": ci_d, "co": co_d,
+                             "n": v["n"], "total": total, "stack": stack, "credit": credit, "oop": max(round(total - credit), 0)}, p))
     return rows
 
 BP_ENTRIES = []
@@ -649,9 +656,11 @@ def bp_rows(progs, tax):
     return match_rows(entries, progs, tax) if got else []
 
 def patch_programs(progs):
-    """Optional HOTEL_PATCH secret: [{"re": <matches id or label>, "drop": true} | {"re": ..., "set": {key: value|null}}]."""
-    try: patches = json.loads(os.environ.get("HOTEL_PATCH") or "[]")
-    except Exception: patches = []
+    """Optional HOTEL_PATCH / HOTEL_PATCH_2 secrets: [{"re": <matches id or label>, "drop": true} | {"re": ..., "set": {key: value|null}}]."""
+    patches = []
+    for var in ("HOTEL_PATCH", "HOTEL_PATCH_2"):                         # _2 layers on top without touching the first
+        try: patches += json.loads(os.environ.get(var) or "[]")
+        except Exception: log(f"hotels: {var} unreadable, ignored")
     out = []
     for p in progs:
         p = dict(p); tag = str(p.get("id", "")) + " " + str(p.get("label", "")); drop = False
@@ -721,8 +730,8 @@ def xotelo_rows(progs, tax):
         credit = total if p.get("cert") else float(p.get("credit", 0))
         stack = bool(p.get("bonus_re") and re.search(p["bonus_re"], h["name"], re.I))
         if stack: credit += float(p.get("bonus_credit", 0))
-        return {**h, "pid": p["id"], "ci": ci, "co": co, "n": n, "nightly": nightly, "total": total, "stack": stack,
-                "credit": credit, "oop": max(round(total - credit), 0)}
+        return extras({**h, "pid": p["id"], "ci": ci, "co": co, "n": n, "nightly": nightly, "total": total, "stack": stack,
+                "credit": credit, "oop": max(round(total - credit), 0)}, p)
     # canary: if the rate source is dead, fail fast instead of burning ~15 min on empty quotes
     probe = [(h["key"], w[0].isoformat(), w[1].isoformat()) for (p, h, w) in jobs[::max(len(jobs) // 8, 1)]][:8]
     with ThreadPoolExecutor(max_workers=8) as ex:
@@ -757,6 +766,8 @@ def post_hotels(rows, progs):
                 free_hits += r["oop"] == 0
                 tag = "🟢 **$0 out of pocket**" if r["oop"] == 0 else f"you pay **${r['oop']:,}**"
                 stk = f" · 🔗 stacks ${r['credit']:,.0f}" if r.get("stack") else ""
+                if r.get("pts"): tag += f" or ~{r['pts']:,} pts → 🟢 $0"
+                if "alt_oop" in r: stk += f" · {p.get('alt_label', 'smaller credit only')}: " + ("$0" if r["alt_oop"] == 0 else f"${r['alt_oop']:,}")
                 lines.append(f"• [{r['name'][:46]}]({short_url(r)}) · {r['city']} · {day} · ${r['nightly']:,.0f}/nt → ${r['total']:,} all-in · {tag}{stk} · ★{r['rating']}")
         e = {"title": p.get("label", p["id"]), "color": int(p.get("color", 0x3987E5)),
              "description": "\n".join(lines) or f"_Nothing under ${H.get('max_oop', 150)} out of pocket in the next {H.get('horizon_days', 150)} days._", "footer": {"text": p.get("footer", "")[:2000]}}
