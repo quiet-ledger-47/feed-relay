@@ -23,6 +23,7 @@ jobs:
           FEED_CONFIG: ${{ secrets.FEED_CONFIG }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           HOTEL_PATCH: ${{ secrets.HOTEL_PATCH }}
+          HOTEL_PATCH_2: ${{ secrets.HOTEL_PATCH_2 }}
         run: python3 relay.py hotels
       - uses: actions/cache/save@v5
         if: always()
