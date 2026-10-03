@@ -317,7 +317,7 @@ def run(mode):
         total = sum(best(p["id"]) or 0 for p in PARTS if p["id"] not in ("ext", "ram", "ram2"))
         r1, r2 = best("ram"), best("ram2")             # 32GB = two single sticks or one 2x16 kit, whichever is cheaper
         total += min([x for x in ((r1 * 2) if r1 else None, r2) if x] or [0])
-        ext = min((v["total"] for _, v in verified["ext"]), default=0)
+        ext = min((v["total"] for _, v in verified.get("ext", [])), default=0)   # parked watch -> key absent
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
              "description": "\n".join(lines)[:3900],
              "footer": {"text": f"Cheapest full set ≈ ${total + ext:,.2f} out the door (item + ship + ~{TAX*100:.0f}% tax) · eBay · OEM only · seller ≥98.5%"}}
