@@ -66,8 +66,8 @@ PARTS = [
      "q": ["00HW553 with cable", "t480 smart card reader with cable", "t470 smart card reader cable", "04X5393 cable"],
      "must": r"(?=.*(?:00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))))(?=.*\bcable\b)", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank|cable only|without cable|no cable",
      "brand": None, "battery": False},
-    {"id": "ram", "label": "16GB DDR4 SO-DIMM (single stick, buy 2)", "cat": "170083", "max_total": 45, "mods": 1,
-     "q": ["16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
+    {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (pair with Kingston 2Rx8)", "cat": "170083", "max_total": 42, "mods": 1,
+     "q": ["kingston kcp426sd8/16", "kingston 16gb 2rx8 ddr4 sodimm", "16gb 2rx8 pc4 sodimm", "16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
      "must": r"(?=.*\b16 ?gb\b)(?=.*(?:ddr4|pc4))(?=.*(?:so-?dimm|sodimm|laptop|notebook|260[- ]?pin))",
@@ -76,7 +76,7 @@ PARTS = [
                 r"\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
      "brand": None, "battery": False},
-    {"id": "ram2", "label": "32GB DDR4 SO-DIMM kit (2x16GB)", "cat": "170083", "max_total": 85, "mods": 2,
+    {"id": "ram2", "label": "32GB DDR4 SO-DIMM kit (2x16GB)", "cat": "170083", "max_total": 85, "mods": 2, "off": True,   # parked 2026-10-04: one 16GB Kingston bought, only a 2nd stick needed
      "q": ["2x16gb ddr4 sodimm", "32gb 2x16gb ddr4 2400 sodimm", "32gb 2x16gb ddr4 2666 sodimm",
            "32gb 2x16gb ddr4 3200 sodimm", "32gb kit ddr4 sodimm laptop", "crucial 32gb kit 2x16gb ddr4 sodimm",
            "samsung 2x16gb ddr4 sodimm", "sk hynix 2x16gb ddr4 sodimm", "kingston 32gb kit 2x16gb ddr4 sodimm"],
@@ -207,7 +207,12 @@ def verify(part, it, tok):
     if part["battery"] and re.search(r"\bnew\b", cond, re.I) and not re.search(r"20(?:2[2-9])", desc + it["title"]):
         notes.append("new-old-stock: ask manufacture date")
     if part["id"] == "ram":
-        notes.append("unit has 2x8GB, both slots full: buy TWO for 32GB (one = 24GB)")
+        rk = " ".join([it["title"], a.get("rank", ""), a.get("module rank", ""), desc[:3000]])
+        if re.search(r"\b2 ?r ?x ?8\b|dual[- ]rank", rk, re.I): notes.append("✅ 2Rx8: matches your Kingston")
+        elif re.search(r"\b[12] ?r ?x ?(?:4|8|16)\b|single[- ]rank", rk, re.I): notes.append("rank differs from 2Rx8 (still works)")
+        else: notes.append("rank not stated: check label for 2Rx8")
+        if re.search(r"kingston", " ".join([it["title"], a.get("brand", "")]), re.I): notes.insert(0, "✅ Kingston")
+        notes.append("pairs with the 16GB Kingston you bought = 32GB")
     if part["id"] == "ram2":
         notes.append("replaces both 8GB sticks: 32GB dual-channel")
     if part["id"] == "scr":
@@ -315,8 +320,7 @@ def run(mode):
             if rows: s["best"][p["id"]] = rows[0][1]["total"]
         best = lambda k: min((v["total"] for _, v in verified.get(k, [])), default=None)
         total = sum(best(p["id"]) or 0 for p in PARTS if p["id"] not in ("ext", "ram", "ram2"))
-        r1, r2 = best("ram"), best("ram2")             # 32GB = two single sticks or one 2x16 kit, whichever is cheaper
-        total += min([x for x in ((r1 * 2) if r1 else None, r2) if x] or [0])
+        total += best("ram") or 0                      # one 16GB already bought 2026-10-04: only the 2nd stick remains
         ext = min((v["total"] for _, v in verified.get("ext", [])), default=0)   # parked watch -> key absent
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
              "description": "\n".join(lines)[:3900],
