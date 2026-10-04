@@ -66,7 +66,7 @@ PARTS = [
      "q": ["00HW553 with cable", "t480 smart card reader with cable", "t470 smart card reader cable", "04X5393 cable"],
      "must": r"(?=.*(?:00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))))(?=.*\bcable\b)", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank|cable only|without cable|no cable",
      "brand": None, "battery": False},
-    {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (pair with Kingston 2Rx8)", "cat": "170083", "max_total": 42, "mods": 1,
+    {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (Kingston or 2Rx8 only)", "cat": "170083", "max_total": 42, "mods": 1,
      "q": ["kingston kcp426sd8/16", "kingston 16gb 2rx8 ddr4 sodimm", "16gb 2rx8 pc4 sodimm", "16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
@@ -208,10 +208,13 @@ def verify(part, it, tok):
         notes.append("new-old-stock: ask manufacture date")
     if part["id"] == "ram":
         rk = " ".join([it["title"], a.get("rank", ""), a.get("module rank", ""), desc[:3000]])
-        if re.search(r"\b2 ?r ?x ?8\b|dual[- ]rank", rk, re.I): notes.append("✅ 2Rx8: matches your Kingston")
-        elif re.search(r"\b[12] ?r ?x ?(?:4|8|16)\b|single[- ]rank", rk, re.I): notes.append("rank differs from 2Rx8 (still works)")
+        king = re.search(r"kingston", " ".join([it["title"], a.get("brand", ""), a.get("manufacturer", "")]), re.I)
+        r2x8 = re.search(r"\b2 ?r ?x ?8\b", rk, re.I)
+        if not (king or r2x8): return None                # STRICT (Six 2026-10-04): Kingston or 2Rx8 only
+        if king: notes.append("✅ Kingston")
+        if r2x8: notes.append("✅ 2Rx8: matches your Kingston")
+        elif re.search(r"\b[12] ?r ?x ?(?:4|16)\b|\b1 ?r ?x ?8\b", rk, re.I): notes.append("rank differs from 2Rx8 (still works)")
         else: notes.append("rank not stated: check label for 2Rx8")
-        if re.search(r"kingston", " ".join([it["title"], a.get("brand", "")]), re.I): notes.insert(0, "✅ Kingston")
         notes.append("pairs with the 16GB Kingston you bought = 32GB")
     if part["id"] == "ram2":
         notes.append("replaces both 8GB sticks: 32GB dual-channel")
