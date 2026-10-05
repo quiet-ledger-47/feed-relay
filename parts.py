@@ -86,7 +86,7 @@ PARTS = [
                 r"\becc\b|\bregistered\b|\brdimm\b|\budimm\b|\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
      "brand": None, "battery": False},
-    {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 25, "off": True,   # parked 2026-10-01 at his request (laptop ships with a charger)
+    {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 25,   # re-armed 2026-10-05 at his request: wants a genuine OEM spare (generic 65W in hand)
      "q": ["ADLX65YLC3A", "ADLX65YLC2A", "ADLX65YCC3A", "01FR024 charger", "01FR025 charger", "4X20M26272",
            "genuine lenovo 65w usb-c charger", "lenovo thinkpad usb-c 65w adapter oem"],
      "must": r"(?=.*(?:ADLX65Y[LCD]C[23]A|01FR02[4-7]|01FR030|SA10M1394[5-8]|4X20M26272|65 ?w))(?=.*(?:usb[- ]?c|type[- ]?c|ADLX65Y))",
