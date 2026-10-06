@@ -86,7 +86,7 @@ PARTS = [
                 r"\becc\b|\bregistered\b|\brdimm\b|\budimm\b|\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
      "brand": None, "battery": False},
-    {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 20,   # re-armed 2026-10-05; cap cut 25->20 same day (he will hold out for the best deal; generic 65W in hand)
+    {"id": "chg", "label": "Charger (genuine 65W USB-C)", "cat": "31510", "max_total": 20, "off": True,   # parked 2026-10-06: bought genuine 65W USB-C (eBay 820185158080, $14.59 shipped)
      "q": ["ADLX65YLC3A", "ADLX65YLC2A", "ADLX65YCC3A", "01FR024 charger", "01FR025 charger", "4X20M26272",
            "genuine lenovo 65w usb-c charger", "lenovo thinkpad usb-c 65w adapter oem"],
      "must": r"(?=.*(?:ADLX65Y[LCD]C[23]A|01FR02[4-7]|01FR030|SA10M1394[5-8]|4X20M26272|65 ?w))(?=.*(?:usb[- ]?c|type[- ]?c|ADLX65Y))",
