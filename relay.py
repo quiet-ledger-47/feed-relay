@@ -135,6 +135,10 @@ MIN_SCREEN = max(15.0, float(HC.get("min_screen_in", 15)))   # hard floor: 15" c
 MIN_FB = float(HC.get("min_feedback_pct", 97))
 MIN_FB_N = int(HC.get("min_feedback_n", 10))
 PREF_BRANDS = [b.lower() for b in HC.get("pref_brands", ["msi", "asus", "razer"])]
+# Excluded brands: hard reject on title, brand or series. Alienware is Dell-made, so it goes too unless config says otherwise.
+EXCL_BRANDS = [b.lower() for b in HC.get("exclude_brands", ["dell", "alienware"])]
+EXCL_RE = re.compile(r"\b(?:" + "|".join(map(re.escape, EXCL_BRANDS)) + r")\b", re.I) if EXCL_BRANDS else None
+REQUIRE_RETURNS = bool(HC.get("require_returns", False))   # True = drop no-return listings instead of flagging them
 DURABLE = re.compile(r"\b(?:msi|asus|rog|tuf|razer|legion|alienware|omen|aorus|gigabyte|predator|helios|"
                      r"thinkpad p|zbook|precision|xps|eurocom|clevo|xmg|eluktronics)\b", re.I)
 EBAY_Q = [
@@ -149,9 +153,10 @@ EBAY_Q = [
     "msi gp76", "msi vector", "msi stealth 15", "msi raider", "asus rog strix g15", "asus rog strix g17",
     "asus rog zephyrus g15", "asus rog zephyrus m16", "asus tuf a15", "asus tuf f15", "asus tuf a17",
     "asus tuf f17", "razer blade 15", "razer blade 17", "lenovo legion 5", "lenovo legion 5 pro",
-    "lenovo legion 7", "lenovo loq", "alienware m15", "alienware m17", "hp omen 15", "hp omen 16",
-    "hp victus 16", "dell g15", "gigabyte aorus 15", "gigabyte g5", "acer nitro 5", "acer helios 300"]
+    "lenovo legion 7", "lenovo loq", "hp omen 15", "hp omen 16",
+    "hp victus 15", "hp victus 16", "msi gf63", "msi gl65", "msi gf75", "asus rog strix g15 2020", "gigabyte aorus 15", "gigabyte g5", "acer nitro 5", "acer helios 300"]
 EBAY_Q += [q for q in (HC.get("ebay_q") or []) if q not in EBAY_Q]   # config adds to the sweep, never shrinks it
+if EXCL_RE: EBAY_Q = [q for q in EBAY_Q if not EXCL_RE.search(q)]   # ...except excluded brands
 EBAY_Q_PER_RUN = int(HC.get("ebay_q_per_run", 12))       # rotate through the list so every query runs ~hourly
 # eBay coupon codes (eBay-only promos surfaced via Slickdeals keyword RSS) - they stack on these listings
 COUPON_FEEDS = [("Slickdeals", sd(q)) for q in HC.get("coupon_q", ["ebay coupon", "ebay refurbished coupon"])]
@@ -290,6 +295,7 @@ def prefilter(it):
     """Cheap title-only screen before spending a getItem call."""
     t = it["title"]
     if BLOCK.search(t) or JUNK.search(t) or NO_CHARGER.search(t): return False
+    if EXCL_RE and EXCL_RE.search(t): return False
     if FOUR_CORE_H.search(t): return False
     if not GOOD_GPU.search(t) and not DURABLE.search(t): return False
     total = (it["price"] or 0) + (it["ship"] or 0)
@@ -351,6 +357,16 @@ def comp_score_ebay(it, tok):
     if total > MAX_TOTAL or (total < MIN_TOTAL and not it.get("auction")): return None
     brand = a.get("brand") or ""
     series = a.get("series") or a.get("product line") or ""
+    if EXCL_RE and EXCL_RE.search(" ".join([brand, series, a.get("model", ""), it["title"]])): return None
+    # Returns: eBay getItem returnTerms. Flag no-returns (or drop if require_returns).
+    rt = d.get("returnTerms") or {}
+    ret_ok = rt.get("returnsAccepted")
+    rp = rt.get("returnPeriod") or {}
+    ret_days = int(rp.get("value") or 0) if "DAY" in str(rp.get("unit") or "DAY").upper() else None
+    if ret_ok is False and REQUIRE_RETURNS: return None
+    ret_txt = (f"{ret_days}-day returns" if ret_days else "returns accepted") if ret_ok else \
+              ("NO RETURNS" if ret_ok is False else "returns ?")
+    if ret_ok and (rt.get("returnShippingCostPayer") or "").upper() == "SELLER": ret_txt += " (free)"
     pref = any(b in (brand + " " + it["title"]).lower() for b in PREF_BRANDS)
     durable = pref or bool(DURABLE.search(" ".join([brand, series, it["title"]])))
     g = gpu.group(0).upper().replace("  ", " ")
@@ -362,12 +378,13 @@ def comp_score_ebay(it, tok):
     if ram is None: notes.append("RAM not stated: confirm 16GB")
     if not cpu6: notes.append("confirm CPU is 6+ cores")
     if not (win11 or win10): notes.append("confirm Windows included")
+    if ret_ok is False: notes.append("NO RETURNS: eBay Money Back Guarantee only covers not-as-described")
     if it.get("auction"):
         left = ((it["ends"] - NOW).total_seconds() / 3600) if it.get("ends") else None
         notes.insert(0, (f"AUCTION ends in {left:.1f}h" if left is not None else "AUCTION") +
                      f", {it.get('bids', 0)} bids. Max bid ${MAX_TOTAL - ship:,.0f} to stay at ${MAX_TOTAL:,.0f} delivered")
     score = (3 if pref else 1 if durable else 0) + (2 if strong else 1) + (1 if cpu6 else 0) + \
-            (1 if win11 else 0) + (1 if charger else 0) + (1 if ram and ram >= 16 else 0)
+            (1 if win11 else 0) + (1 if charger else 0) + (1 if ram and ram >= 16 else 0) + (1 if ret_ok else 0)
     clean = not any(n for n in notes if not n.startswith("AUCTION"))  # every spec confirmed by the seller
     tier = ("🏆 TOP PICK" if score >= 8 and clean and cpu6 else "🎮 STRONG" if score >= 6 else "🎮 SOLID")
     if it.get("auction"): tier += " · 🔨 AUCTION"
@@ -375,7 +392,7 @@ def comp_score_ebay(it, tok):
             f"**RAM** {int(ram)}GB" if ram else "**RAM** ?", f"**Screen** {a.get('screen size') or f'{scr:g} in'}",
             f"**OS** {os_txt or ('Win11' if win11 else 'Win10' if win10 else '?')}",
             f"**Brand** {brand or '?'}{(' ' + series) if series else ''}",
-            f"**Charger** {charger or 'not stated'}"]
+            f"**Charger** {charger or 'not stated'}", f"**Returns** {ret_txt}"]
     it["desc"] = f"{it['cond']} · seller {it['seller']} · " + ("auction" if it.get("auction") else "buy it now")
     return {"price": price, "ship": ship or None, "total": total, "tier": tier, "profile": "gaming", "score": score,
             "why": g + (" · preferred brand" if pref else ""), "notes": notes, "specs": " · ".join(spec), "store": "eBay"}
