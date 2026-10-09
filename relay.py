@@ -226,16 +226,17 @@ def ebay_json(tok, url):
         log(f"ebay fail {type(e).__name__}"); return None
 
 AUCTION_Q = HC.get("auction_q") or ["gaming laptop", "rtx laptop", "(msi, asus, razer) laptop"]
-# MODEL LOCK (2026-10-08): the second laptop must match the first one exactly (MSI GF65 Thin, GTX 1660 Ti) so the
+# MODEL LOCK (2026-10-08): the second laptop must be the same chassis as the first (MSI GF65 Thin; any GPU/CPU variant, same price cap) so the
 # two are identical. While on, the sweep, the auctions and the scorer only accept that model. Config: hunter.model_lock
 # = false to switch off, or {"model": regex, "gpu": regex, "q": [queries]} to retarget.
 _ML = HC.get("model_lock", True)
 if _ML is True: _ML = {}
 LOCK = None if _ML is False else {
     "model": re.compile(_ML.get("model", r"\bgf ?65\b"), re.I),
-    "gpu": re.compile(_ML.get("gpu", r"\b(?:gtx ?)?1660 ?ti\b"), re.I),
+    "gpu": re.compile(_ML.get("gpu", r"\b(?:gtx ?1660 ?ti|1660 ?ti|rtx ?20[67]0|rtx ?30[56]0|gtx ?1650)\b"), re.I),
     "q": _ML.get("q", ["msi gf65 thin", "msi gf65 thin 10sdr", "gf65 thin 10sdr-1026us", "msi gf65 1660 ti",
-                       "gf65 10sdr", "msi gf65 gaming laptop", "msi gf65 thin i7 1660ti"])}
+                       "gf65 10sdr", "msi gf65 gaming laptop", "msi gf65 thin i7 1660ti", "msi gf65 thin 10ue",
+                       "msi gf65 thin 10se", "msi gf65 thin 9sd", "msi gf65 rtx 3060", "msi gf65 rtx 2060"])}
 if LOCK:
     EBAY_Q, AUCTION_Q = list(LOCK["q"]), list(LOCK["q"])
 AUCTION_WINDOW_H = float(HC.get("auction_window_h", 72))   # post an auction only once it is this close to ending
@@ -341,7 +342,7 @@ def comp_score_ebay(it, tok):
         mtxt = " ".join([it["title"], a.get("model", ""), a.get("series", ""), a.get("product line", ""), a.get("mpn", "")])
         if not LOCK["model"].search(mtxt): return None
         if not LOCK["gpu"].search(" ".join([it["title"], a.get("gpu", ""), a.get("graphics processing type", ""), blob])): return None
-        if re.search(r"\b(?:rtx ?20[67]0|gtx ?1650)\b", " ".join([it["title"], a.get("gpu", "")]), re.I): return None
+        # 2026-10-08 Six: "same model but different specs is fine — needs to look the same; price may not differ" → any GF65 Thin GPU variant; price cap unchanged
     # CPU
     cpu_txt = " ".join([a.get("processor", ""), it["title"]])
     if FOUR_CORE_H.search(cpu_txt): return None
