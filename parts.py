@@ -67,8 +67,7 @@ PARTS = [
            "thinkpad t480 smart card reader", "00HW553", "t480 smartcard reader cable", "thinkpad smart card reader 00HW553"],
      "must": r"(?=.*(?:00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))))(?=.*\bcable\b)", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank|cable only|without cable|no cable",
      "brand": None, "battery": False},
-    {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (Kingston or 2Rx8 only)", "cat": "170083", "max_total": 42, "mods": 1, "off": True,   # parked 2026-10-09: 2nd Kingston KCP426SD8/16 bought (eBay 287626316892)
-     
+    {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (Kingston or 2Rx8 only)", "cat": "170083", "max_total": 42, "mods": 1,
      "q": ["kingston kcp426sd8/16", "kingston 16gb 2rx8 ddr4 sodimm", "16gb 2rx8 pc4 sodimm", "16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
