@@ -62,16 +62,19 @@ PARTS = [
      "must": EXT72_FRU + r"|(?=.*\b7[0-2] ?wh\b)(?=.*61\+\+)",
      "exclude": EXT24_FRU + "|" + EXT48_FRU + r"|\b(?:2[34]|4[78]) ?wh\b|61\+(?!\+)",
      "brand": "lenovo", "battery": True},
-    {"id": "scr", "label": "Smart card reader + cable (00HW553)", "cat": "31530", "max_total": 35,
-     "q": ["00HW553 with cable", "t480 smart card reader with cable", "t470 smart card reader cable", "04X5393 cable"],
+    {"id": "scr", "label": "Smart card reader + cable (00HW553)", "cat": "31530", "max_total": 19,   # 2026-10-08: beat the ~$20 going rate
+     "q": ["00HW553 with cable", "t480 smart card reader with cable", "t470 smart card reader cable", "04X5393 cable",
+           "thinkpad t480 smart card reader", "00HW553", "t480 smartcard reader cable", "thinkpad smart card reader 00HW553"],
      "must": r"(?=.*(?:00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))))(?=.*\bcable\b)", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank|cable only|without cable|no cable",
      "brand": None, "battery": False},
     {"id": "ram", "label": "2nd 16GB DDR4 SO-DIMM (Kingston or 2Rx8 only)", "cat": "170083", "max_total": 42, "mods": 1,
      "q": ["kingston kcp426sd8/16", "kingston 16gb 2rx8 ddr4 sodimm", "16gb 2rx8 pc4 sodimm", "16gb ddr4 2400 sodimm", "16gb ddr4 2666 sodimm", "16gb ddr4 3200 sodimm", "16gb pc4-2400t sodimm",
            "16gb pc4-2666v sodimm", "16gb pc4-3200aa sodimm", "samsung 16gb ddr4 sodimm", "sk hynix 16gb ddr4 sodimm",
            "crucial 16gb ddr4 sodimm", "micron 16gb ddr4 sodimm", "kingston 16gb ddr4 sodimm"],
-     "must": r"(?=.*\b16 ?gb\b)(?=.*(?:ddr4|pc4))(?=.*(?:so-?dimm|sodimm|laptop|notebook|260[- ]?pin))",
-     "exclude": r"\b[24] ?x ?(?:4|8|16) ?gb\b|\b(?:4|8|16) ?gb ?x ?[24]\b|\b(?:4|8) ?gb\b|\b32 ?gb\b|\bkit\b|\bpair\b|"
+     # 2026-10-08 tightened (desktop + 8GB listings were leaking): title must say SO-DIMM / 260-pin, never just "laptop"
+     "must": r"(?=.*\b16 ?gb?\b)(?=.*(?:ddr4|pc4))(?=.*(?:so[- ]?dimm|sodimm|260[- ]?pin))",
+     "exclude": r"\b[24] ?x ?(?:4|8|16) ?gb?|\b(?:4|8|16) ?gb? ?x ?[24]\b|\b(?:4|8) ?gb?(?![0-9])|\b32 ?gb?\b|\bkit\b|\bpair\b|"
+                r"(?<!so)(?<!so-)(?<!so )\bu?dimm\b|\bfor (?:pc|desktop)\b|\bpc ram\b|\bdesktop|\b288\b|\bimac\b|\bmac ?mini\b|"
                 r"\b[2-9] ?(?:pcs|pieces|sticks|modules)\b|\bset of\b|\becc\b|\bregistered\b|\brdimm\b|\budimm\b|"
                 r"\bdesktop\b|\b288[- ]?pin\b|\bddr3\b|\bddr5\b|\bserver\b",
      "brands": r"samsung|sk ?hynix|hynix|micron|crucial|kingston|lenovo", "oem": False,
@@ -180,6 +183,12 @@ def verify(part, it, tok):
         if mods and mods != want: return None
         if per and not re.search(r"\b16 ?gb\b", per, re.I): return None
         if not per and tot and not re.search(r"\b%d ?gb\b" % (16 * want), tot, re.I): return None
+        if not per and not tot: return None                                      # capacity must be confirmed in the specifics
+        ff = " ".join([a.get("form factor", ""), a.get("type", ""), a.get("number of pins", "")])
+        if re.search(r"(?<!so-)(?<!so)(?<!so )\b(?:u|r)?dimm\b|\b288\b|desktop", ff, re.I): return None    # desktop stick
+        if not re.search(r"so[- ]?dimm|260", ff + " " + it["title"], re.I): return None
+        if re.search(r"\bdesktop (?:ram|memory|pc)\b|\bfor desktops?\b", " ".join([notes_txt, desc[:2000]]), re.I) and \
+           not re.search(r"so-?dimm|laptop|notebook", ff, re.I): return None
     costs = []                                      # listing page is authoritative for shipping
     for so in d.get("shippingOptions") or []:
         v = (so.get("shippingCost") or {}).get("value")
