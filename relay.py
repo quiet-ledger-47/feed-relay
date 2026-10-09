@@ -128,7 +128,8 @@ def key(it):
 #   Screen must be CONFIRMED >= 15" (floor enforced in code), and any cosmetic damage or wear in the title,
 #   condition notes or description is a hard reject. eBay "Good - Refurbished" (visible wear) is excluded.
 HC = CFG.get("hunter") or {}
-MAX_TOTAL = float(HC.get("max_total", 500))
+MAX_TOTAL = float(HC.get("target_total", 400))   # 2026-10-09 Six: "second laptop can be around $400 and I'll do offers"
+OFFER_CAP = MAX_TOTAL * float(HC.get("offer_room", 1.25))   # Best Offer listings may be listed up to this; he offers down to MAX_TOTAL
 MIN_TOTAL = float(HC.get("min_total", 180))          # below this is almost always parts/scam bait
 MIN_RAM = int(HC.get("min_ram_gb", 16))
 MIN_SCREEN = max(15.0, float(HC.get("min_screen_in", 15)))   # hard floor: 15" class (15.6/16/17.3)
@@ -229,7 +230,7 @@ AUCTION_Q = HC.get("auction_q") or ["gaming laptop", "rtx laptop", "(msi, asus, 
 # MODEL LOCK (2026-10-08): the second laptop must be the same chassis as the first (MSI GF65 Thin; any GPU/CPU variant, same price cap) so the
 # two are identical. While on, the sweep, the auctions and the scorer only accept that model. Config: hunter.model_lock
 # = false to switch off, or {"model": regex, "gpu": regex, "q": [queries]} to retarget.
-_ML = HC.get("model_lock", True)
+_ML = HC.get("model_lock_v2", False)   # 2026-10-09: GF65-only lock off (GF65 BINs "terrible"); any spec-passing laptop at ~$400
 if _ML is True: _ML = {}
 LOCK = None if _ML is False else {
     "model": re.compile(_ML.get("model", r"\bgf ?65\b"), re.I),
@@ -249,7 +250,7 @@ def ebay_search(tok, q, auction=False):
     opt = "AUCTION" if auction else "FIXED_PRICE"
     qs = urllib.parse.urlencode({"q": q, "category_ids": "177", "limit": "100",
         "sort": "endingSoonest" if auction else "newlyListed",
-        "filter": f"price:[{lo}..{int(MAX_TOTAL)}],priceCurrency:USD,itemLocationCountry:US,"
+        "filter": f"price:[{lo}..{int(MAX_TOTAL if auction else OFFER_CAP)}],priceCurrency:USD,itemLocationCountry:US,"
                   "conditionIds:{1000|1500|2000|2010|2020|2500|3000},buyingOptions:{" + opt + "}"})
     data = ebay_json(tok, "https://api.ebay.com/buy/browse/v1/item_summary/search?" + qs) or {}
     out = []
@@ -275,7 +276,7 @@ def ebay_search(tok, q, auction=False):
         out.append({"id": x.get("itemId"), "title": x.get("title") or "", "link": (x.get("itemWebUrl") or "").split("?")[0],
                     "when": when, "desc": "", "thumb": None, "img": ((x.get("image") or {}).get("imageUrl")),
                     "source": "eBay", "price": p, "ship": sh, "auction": auc, "ends": ends, "bids": x.get("bidCount") or 0,
-                    "cond": x.get("condition") or "",
+                    "cond": x.get("condition") or "", "offer": "BEST_OFFER" in (x.get("buyingOptions") or []),
                     "seller": f"{sel.get('feedbackPercentage','?')}% ({sel.get('feedbackScore','?')})"})
     return out
 
@@ -313,7 +314,7 @@ def prefilter(it):
     if FOUR_CORE_H.search(t): return False
     if not GOOD_GPU.search(t) and not DURABLE.search(t): return False
     total = (it["price"] or 0) + (it["ship"] or 0)
-    if total > MAX_TOTAL or (total < MIN_TOTAL and not it.get("auction")): return False
+    if total > (OFFER_CAP if it.get("offer") else MAX_TOTAL) or (total < MIN_TOTAL and not it.get("auction")): return False
     m = re.search(r"\b(\d{1,2}) ?gb\b(?! ?(?:ssd|hdd|emmc|gddr|vram|video))", t, re.I)
     if m and int(m.group(1)) < MIN_RAM and not re.search(r"\b(?:16|24|32|64) ?gb\b", t, re.I): return False
     m = SCREEN_TXT.search(t)
@@ -373,7 +374,7 @@ def comp_score_ebay(it, tok):
     ship = it["ship"] or 0.0
     if it.get("auction"): price = it["price"] or price       # current bid, not the start price
     total = price + ship
-    if total > MAX_TOTAL or (total < MIN_TOTAL and not it.get("auction")): return None
+    if total > (OFFER_CAP if it.get("offer") else MAX_TOTAL) or (total < MIN_TOTAL and not it.get("auction")): return None
     brand = a.get("brand") or ""
     series = a.get("series") or a.get("product line") or ""
     if EXCL_RE and EXCL_RE.search(" ".join([brand, series, a.get("model", ""), it["title"]])): return None
@@ -398,13 +399,16 @@ def comp_score_ebay(it, tok):
     if not cpu6: notes.append("confirm CPU is 6+ cores")
     if not (win11 or win10): notes.append("confirm Windows included")
     if ret_ok is False: notes.append("NO RETURNS: eBay Money Back Guarantee only covers not-as-described")
+    if it.get("offer") and total > MAX_TOTAL:
+        notes.insert(0, f"OFFER: listed ${total:,.0f} delivered. Offer ~${MAX_TOTAL - ship:,.0f} + ${ship:,.0f} ship to land at ${MAX_TOTAL:,.0f}")
+    elif it.get("offer"): notes.insert(0, "Best Offer open: try ~10% under")
     if it.get("auction"):
         left = ((it["ends"] - NOW).total_seconds() / 3600) if it.get("ends") else None
         notes.insert(0, (f"AUCTION ends in {left:.1f}h" if left is not None else "AUCTION") +
                      f", {it.get('bids', 0)} bids. Max bid ${MAX_TOTAL - ship:,.0f} to stay at ${MAX_TOTAL:,.0f} delivered")
     score = (3 if pref else 1 if durable else 0) + (2 if strong else 1) + (1 if cpu6 else 0) + \
             (1 if win11 else 0) + (1 if charger else 0) + (1 if ram and ram >= 16 else 0) + (1 if ret_ok else 0)
-    clean = not any(n for n in notes if not n.startswith("AUCTION"))  # every spec confirmed by the seller
+    clean = not any(n for n in notes if not n.startswith(("AUCTION", "OFFER", "Best Offer")))  # every spec confirmed by the seller
     tier = ("🏆 TOP PICK" if score >= 8 and clean and cpu6 else "🎮 STRONG" if score >= 6 else "🎮 SOLID")
     if it.get("auction"): tier += " · 🔨 AUCTION"
     spec = [f"**GPU** {g}", f"**CPU** {a.get('processor') or ('6+ core' if cpu6 else '?')}",
