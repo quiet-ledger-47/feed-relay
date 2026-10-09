@@ -1,7 +1,7 @@
 name: scan
 on:
   schedule:
-    - cron: "1 */4 * * *"   # starts a ~5.5h in-job loop (deals every 15 min); GitHub's own */15 cron was firing only every 4-6h
+    - cron: "1 */4 * * *"   # starts a ~5.5h in-job loop (deals every 10 min); GitHub's own */15 cron was firing only every 4-6h
   workflow_dispatch:
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
           end=$(( $(date +%s) + 330*60 ))
           while [ "$(date +%s)" -lt "$end" ]; do
             python3 relay.py deals || echo "deals failed, retry next cycle"
-            sleep 900
+            sleep 600   # 2026-10-08: every 10 min (public repo = free minutes; eBay quota checked)
           done
       - uses: actions/cache/save@v5
         if: always()
