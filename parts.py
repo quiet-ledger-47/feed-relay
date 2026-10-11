@@ -100,6 +100,15 @@ PARTS = [
      "must": r"(?=.*ax210)(?=.*(?:ngw|m\.?2|2230|ngff))", "brands": r"intel",
      "exclude": r"desktop|pci-?e x1|pcie card|\badapter\b|antenna kit|with antennas?|\bkit\b|usb|vpro|ax211|cnvio",
      "brand": None, "battery": False},
+    # 2026-10-11 Six: "SSD B+ key that fits in a t480" for a Kali dual-boot drive. T480 WWAN slot (PSREF: SSD-in-WWAN supported)
+    # takes M.2 2242 PCIe NVMe with a B+M (two-notch) edge; single-notch M-key and SATA 2242 do not fit/work. 128GB is plenty for Kali.
+    {"id": "wwan", "label": "Kali drive: M.2 2242 NVMe B+M key (WWAN slot)", "cat": "175669", "max_total": 25, "oem": False,
+     "q": ["2242 nvme b+m key ssd", "m.2 2242 nvme b+m 128gb", "m.2 2242 nvme b+m 256gb", "wd sn520 2242", "sdapnuw 2242",
+           "wd sn530 2242", "2242 nvme two notch", "t480 wwan ssd 2242"],
+     "must": r"(?=.*\b2242\b)(?=.*(?:nvme|pcie))(?=.*(?:\bb ?\+ ?m\b|\bb ?& ?m\b|\bb and m\b|two[- ]notch|dual[- ]notch|\bsn5[23]0\b))",
+     "exclude": r"\bsata\b|\bngff sata\b|single[- ]notch|\bm[- ]key only\b|adapter|enclosure|\bcase\b|heat ?sink|\blot\b|"
+                r"\b[2-9] ?(?:pcs|pack|pieces)\b|\b(?:16|32|64) ?gb\b|\bfor parts\b|\bbad\b|\b2230\b(?!.*2242)",
+     "brand": None, "battery": False},
     {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # his unit has no reader + blank palm rest: needs FPR palm rest too
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
      "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
@@ -231,6 +240,9 @@ def verify(part, it, tok):
         notes.append("needs the reader-to-board cable: confirm included")
     if part["id"] == "fpr":
         notes.append("confirm your palm rest has the fingerprint opening (non-FPR units use a blank)")
+    if part["id"] == "wwan":
+        cap = (re.search(r"\b(128|256|512) ?gb\b|\b1 ?tb\b", it["title"], re.I) or [None])[0] or "size ?"
+        notes.append("goes in the WWAN slot (B+M key); boot Kali from F12 so Windows/BitLocker stays untouched")
     if part["id"] == "wifi":
         notes.append("T480 has no Wi-Fi whitelist; reuse your 2 antenna leads (MHF4)")
     if it["auction"]:
