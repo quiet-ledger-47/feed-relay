@@ -62,7 +62,7 @@ PARTS = [
      "must": EXT72_FRU + r"|(?=.*\b7[0-2] ?wh\b)(?=.*61\+\+)",
      "exclude": EXT24_FRU + "|" + EXT48_FRU + r"|\b(?:2[34]|4[78]) ?wh\b|61\+(?!\+)",
      "brand": "lenovo", "battery": True},
-    {"id": "scr", "label": "Smart card reader + cable (00HW553)", "cat": "31530", "max_total": 19,   # 2026-10-08: beat the ~$20 going rate
+    {"id": "scr", "label": "Smart card reader + cable (00HW553)", "cat": "31530", "max_total": 19, "off": True,   # bought 2026-10-21 (Six) — parked
      "q": ["00HW553 with cable", "t480 smart card reader with cable", "t470 smart card reader cable", "04X5393 cable",
            "thinkpad t480 smart card reader", "00HW553", "t480 smartcard reader cable", "thinkpad smart card reader 00HW553"],
      "must": r"(?=.*(?:00HW553|(?=.*smart ?card)(?=.*\bt4[78]0\b(?!s))))(?=.*\bcable\b)", "exclude": r"\bt4[78]0s\b|\bt49\d|filler|dummy|blank|cable only|without cable|no cable",
