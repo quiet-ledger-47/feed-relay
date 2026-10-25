@@ -319,18 +319,23 @@ def gather(full=False):
 # 2026-10-25 Six: the monitor "doesn't have to be eBay, it can be from Slickdeals as well" -> Slickdeals keyword RSS,
 # same must/exclude rules as the eBay "mon" watch, price parsed from the deal title, posted once per deal (scan mode only).
 SD_MON_Q = ["34 ultrawide monitor", "3440x1440", "ultrawide 1440p", "34\" curved monitor", "uwqhd monitor"]
+# 2026-10-25 Six "I will wait for the price to be lower": + dealnews 34" monitor RSS (catches Newegg/Walmart/Best Buy);
+# @everyone only when it beats the $160 refurb he passed on (<= $155 out the door) or a 165Hz+ panel lands <= $200.
+DN_MON = "https://www.dealnews.com/c75/Computers/Peripherals/Monitors/f1486/34/?rss=1"
+PING_TOTAL = 155
 PRICE_RE = re.compile(r"\$\s?(\d{2,4}(?:,\d{3})?(?:\.\d{2})?)(?!\s*(?:off|discount|gift|credit|rebate|back))", re.I)
 
 def slickdeals_mon(s):
     mon = next((p for p in PARTS if p["id"] == "mon"), None)
     if not mon: return []
     out, seen_links = [], set()
-    for q in SD_MON_Q:
-        for it in parse_feed(get(sd(q)) or "", "Slickdeals"):
+    feeds = [("Slickdeals", sd(q)) for q in SD_MON_Q] + [("dealnews", DN_MON)]
+    for src, url in feeds:
+        for it in parse_feed(get(url) or "", src):
             t, link = it["title"], it["link"]
             if link in seen_links or not fresh(it, 72) or BLOCK.search(t): continue
             seen_links.add(link)
-            k = "sd:" + link
+            k = ("sd:" if src == "Slickdeals" else "dn:") + link
             if k in s["seen"]: continue
             if JUNK.search(t) or re.search(mon["exclude"], t, re.I) or not re.search(mon["must"], t, re.I): continue
             m = PRICE_RE.search(t)
@@ -341,16 +346,18 @@ def slickdeals_mon(s):
             s["seen"][k] = NOW.timestamp()
             notes = ["✅ HDMI 2.1: full refresh from the Blade" if re.search(r"hdmi ?2\.1", t + " " + (it.get("desc") or ""), re.I)
                      else "check HDMI version: 2.1 = full refresh from the Blade, 2.0 ≈ 100Hz"]
+            hzm = re.search(r"\b(\d{3}) ?hz\b", t, re.I); hz = int(hzm.group(1)) if hzm else 0
+            ping = total <= PING_TOTAL or hz >= 165
             if it.get("thumb") is not None: notes.append(f"Slickdeals thumbs {it['thumb']:+d}")
             notes.append("price from the deal title; confirm shipping/tax at the store")
-            e = {"title": t[:250], "url": link, "color": 0x8E44AD, "author": {"name": "🛒 SLICKDEALS · " + mon["label"]},
+            e = {"title": t[:250], "url": link, "color": 0x8E44AD, "author": {"name": "🛒 " + src.upper() + " · " + mon["label"]},
                  "fields": [{"name": "Est. out the door", "value": f"**${total:,.2f}**", "inline": True},
                             {"name": "Deal price", "value": f"${price:,.2f}", "inline": True},
                             {"name": "Check", "value": " · ".join(notes)[:300], "inline": False}],
-                 "footer": {"text": f"Slickdeals deal feed · est. = price + ~{TAX*100:.0f}% tax · verify the store listing"},
+                 "footer": {"text": f"{src} deal feed · est. = price + ~{TAX*100:.0f}% tax · verify the store listing"},
                  "timestamp": NOW.isoformat()}
             if (it.get("img") or "").startswith("https://"): e["thumbnail"] = {"url": it["img"]}
-            out.append(e)
+            out.append((e, ping, src))
         time.sleep(0.6)
     return out[:4]
 
@@ -392,9 +399,10 @@ def run(mode):
                              "allowed_mentions": {"parse": ["everyone"]}, "embeds": [embed(p, it, v, tag)]})
             sent += ok; time.sleep(1.2)
         try:
-            for e in slickdeals_mon(s):
+            for e, ping, src in slickdeals_mon(s):
                 sent += post(HOOK, {"username": "Computer Project", "avatar_url": AV,
-                                    "content": "**🛒 SLICKDEALS** · 34\" ultrawide monitor", "embeds": [e]}); time.sleep(1.2)
+                                    "content": ("@everyone " if ping else "") + f"**🛒 {src.upper()}** · 34\" ultrawide monitor",
+                                    "allowed_mentions": {"parse": ["everyone"]}, "embeds": [e]}); time.sleep(1.2)
         except Exception as ex:
             log(f"slickdeals mon fail {type(ex).__name__}")
         log(json.dumps({"mode": "scan", "found": {k: len(v) for k, v in found.items()}, "getitem": checked, "posted": sent}))
