@@ -129,9 +129,9 @@ def key(it):
 #   condition notes or description is a hard reject. eBay "Good - Refurbished" (visible wear) is excluded.
 HC = CFG.get("hunter") or {}
 MAX_TOTAL = float(HC.get("target_total", 400))   # 2026-10-09 Six: "second laptop can be around $400 and I'll do offers"
-OFFER_CAP = MAX_TOTAL * float(HC.get("offer_room", 1.25))   # Best Offer listings may be listed up to this; he offers down to MAX_TOTAL
+OFFER_CAP = MAX_TOTAL * float(HC.get("offer_room", 1.4))   # 2026-10-25 "be more aggressive": 1.25 -> 1.4. Best Offer listings may be listed up to this; he offers down to MAX_TOTAL
 MIN_TOTAL = float(HC.get("min_total", 180))          # below this is almost always parts/scam bait
-MIN_RAM = int(HC.get("min_ram_gb", 16))
+MIN_RAM = int(HC.get("min_ram_gb", 8))   # 2026-10-25 aggressive: 8GB OK (a 16GB kit is ~$25-30); flagged in notes
 MIN_SCREEN = max(15.0, float(HC.get("min_screen_in", 15)))   # hard floor: 15" class (15.6/16/17.3)
 MIN_FB = float(HC.get("min_feedback_pct", 97))
 MIN_FB_N = int(HC.get("min_feedback_n", 10))
@@ -140,6 +140,13 @@ PREF_BRANDS = [b.lower() for b in HC.get("pref_brands", ["msi", "asus", "razer"]
 EXCL_BRANDS = [b.lower() for b in HC.get("exclude_brands", ["dell", "alienware"])]
 EXCL_RE = re.compile(r"\b(?:" + "|".join(map(re.escape, EXCL_BRANDS)) + r")\b", re.I) if EXCL_BRANDS else None
 REQUIRE_RETURNS = bool(HC.get("require_returns", False))   # True = drop no-return listings instead of flagging them
+# 2026-10-25 Six "be more aggressive in laptop finding" (kid's laptop): light cosmetic wear is FLAGGED, not rejected;
+# only functional damage (cracks, broken/loose hinge, dents, dead pixels, burn-in, missing keys, screen lines/spots) still rejects.
+ALLOW_WEAR = bool(HC.get("allow_light_wear", True))
+SERIOUS = re.compile(r"crack|broken|\bdent|ding|dead pixel|stuck pixel|burn[- ]?in|hinge|missing|screen (?:spot|line|mark|bleed)|"
+                     r"backlight bleed|white spot|pressure|gouge|\bdamage|\bchip", re.I)
+def wear_reject(hit):
+    return bool(hit) and (not ALLOW_WEAR or bool(SERIOUS.search(hit)))
 DURABLE = re.compile(r"\b(?:msi|asus|rog|tuf|razer|legion|alienware|omen|aorus|gigabyte|predator|helios|"
                      r"thinkpad p|zbook|precision|xps|eurocom|clevo|xmg|eluktronics)\b", re.I)
 EBAY_Q = [
@@ -158,7 +165,7 @@ EBAY_Q = [
     "hp victus 15", "hp victus 16", "msi gf63", "msi gl65", "msi gf75", "asus rog strix g15 2020", "gigabyte aorus 15", "gigabyte g5", "acer nitro 5", "acer helios 300"]
 EBAY_Q += [q for q in (HC.get("ebay_q") or []) if q not in EBAY_Q]   # config adds to the sweep, never shrinks it
 if EXCL_RE: EBAY_Q = [q for q in EBAY_Q if not EXCL_RE.search(q)]   # ...except excluded brands
-EBAY_Q_PER_RUN = int(HC.get("ebay_q_per_run", 12))       # rotate through the list so every query runs ~hourly
+EBAY_Q_PER_RUN = int(HC.get("ebay_q_per_run", 16))       # rotate through the list so every query runs ~hourly
 # eBay coupon codes (eBay-only promos surfaced via Slickdeals keyword RSS) - they stack on these listings
 COUPON_FEEDS = [("Slickdeals", sd(q)) for q in HC.get("coupon_q", ["ebay coupon", "ebay refurbished coupon"])]
 
@@ -240,10 +247,10 @@ LOCK = None if _ML is False else {
                        "msi gf65 thin 10se", "msi gf65 thin 9sd", "msi gf65 rtx 3060", "msi gf65 rtx 2060"])}
 if LOCK:
     EBAY_Q, AUCTION_Q = list(LOCK["q"]), list(LOCK["q"])
-AUCTION_WINDOW_H = float(HC.get("auction_window_h", 72))   # post an auction only once it is this close to ending
-GETITEM_CAP = int(HC.get("getitem_cap", 25))                # per run (Buy It Now); keeps us under the eBay Browse daily quota
+AUCTION_WINDOW_H = float(HC.get("auction_window_h", 120))   # post an auction only once it is this close to ending
+GETITEM_CAP = int(HC.get("getitem_cap", 30))                # per run (Buy It Now); keeps us under the eBay Browse daily quota
 AUCTION_CAP = int(HC.get("auction_getitem_cap", 15))        # per run (auctions get their own budget so BIN backlog cannot starve them)
-AUCTION_POSTS = int(HC.get("auction_posts", 4))             # auction posts per run, on top of MAX_POSTS
+AUCTION_POSTS = int(HC.get("auction_posts", 6))             # auction posts per run, on top of MAX_POSTS
 
 def ebay_search(tok, q, auction=False):
     lo = 0 if auction else int(MIN_TOTAL - 40)
@@ -319,7 +326,7 @@ def prefilter(it):
     if m and int(m.group(1)) < MIN_RAM and not re.search(r"\b(?:16|24|32|64) ?gb\b", t, re.I): return False
     m = SCREEN_TXT.search(t)
     if m and float(m.group(1)) < MIN_SCREEN: return False   # small screen called out in the title
-    if cosmetic_hit(t): return False                        # "scratched", "minor wear", "dent" in the title
+    if wear_reject(cosmetic_hit(t)): return False           # functional damage in the title (light wear is flagged later)
     return True
 
 def comp_score_ebay(it, tok):
@@ -330,11 +337,12 @@ def comp_score_ebay(it, tok):
     blob = " ".join([it["title"], d.get("shortDescription") or "", d.get("conditionDescription") or "",
                      " ".join(f"{k}: {v}" for k, v in a.items()), desc_txt[:6000]])
     if JUNK.search(" ".join([it["title"], d.get("conditionDescription") or ""])): return None
-    if re.search(r"\bfor parts\b|not working|as[- ]is|good - refurbished", d.get("condition") or "", re.I): return None
+    if re.search(r"\bfor parts\b|not working|as[- ]is" + ("" if ALLOW_WEAR else "|good - refurbished"), d.get("condition") or "", re.I): return None
     # Cosmetic: seller condition notes, item specifics and description all have to be clean
     cos_txt = " ".join([it["title"], d.get("conditionDescription") or "", d.get("shortDescription") or "",
                         a.get("cosmetic condition", ""), a.get("condition description", ""), desc_txt[:6000]])
-    if cosmetic_hit(cos_txt): return None
+    wear = cosmetic_hit(cos_txt)
+    if wear_reject(wear): return None
     # GPU
     gpu = GOOD_GPU.search(" ".join([it["title"], a.get("gpu", ""), a.get("graphics processing type", ""),
                                     a.get("graphics card", ""), d.get("shortDescription") or ""])) or GOOD_GPU.search(blob)
@@ -396,6 +404,8 @@ def comp_score_ebay(it, tok):
     notes = []
     if charger is None: notes.append("charger not stated: ask seller")
     if ram is None: notes.append("RAM not stated: confirm 16GB")
+    elif ram < 16: notes.append(f"{int(ram)}GB RAM: add a 16GB kit (~$25-30)")
+    if wear: notes.append(f"light cosmetic wear ('{wear}'): use it to offer lower")
     if not cpu6: notes.append("confirm CPU is 6+ cores")
     if not (win11 or win10): notes.append("confirm Windows included")
     if ret_ok is False: notes.append("NO RETURNS: eBay Money Back Guarantee only covers not-as-described")
