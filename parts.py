@@ -109,6 +109,19 @@ PARTS = [
      "exclude": r"\bsata\b|\bngff sata\b|single[- ]notch|\bm[- ]key only\b|adapter|enclosure|\bcase\b|heat ?sink|\blot\b|"
                 r"\b[2-9] ?(?:pcs|pack|pieces)\b|\b(?:16|32|64) ?gb\b|\bfor parts\b|\bbad\b|\b2230\b(?!.*2242)",
      "brand": None, "battery": False},
+    # 2026-10-25 Six: one monitor for WoW + web + Twitch off the Razer Blade 14 (2021, RTX 3070, HDMI 2.1 out, no DisplayPort).
+    # Target: 34" ultrawide 3440x1440, >=100Hz, used/refurb/new, <=$200 out the door. HDMI 2.1 = full 144Hz+ from the Blade;
+    # HDMI 2.0 panels cap ~100Hz at 3440x1440 (still fine). Dell/Alienware excluded (his brand rule). Can wait for Black Friday.
+    {"id": "mon", "label": "34\" ultrawide 3440x1440 monitor (≥100Hz) for the Blade 14", "cat": "80053", "max_total": 200, "oem": False,
+     "q": ["34 ultrawide 3440x1440", "34 inch curved gaming monitor 1440p 144hz", "3440x1440 monitor", "uwqhd 34 monitor",
+           "aoc cu34g2x", "aoc cu34g3s", "xiaomi g34wqi", "xiaomi curved gaming monitor 34", "lg 34gn850", "lg 34gp83a",
+           "lg 34gp63a", "msi mag342cq", "msi optix mag342cqr", "gigabyte g34wqc", "samsung odyssey g5 34", "asus tuf vg34vq",
+           "sceptre 34 3440x1440", "ktc h34s18", "monoprice 34 ultrawide 144hz", "philips 34 ultrawide 3440x1440"],
+     "must": r"(?=.*\b3[45](?:\.\d)?(?: ?(?:\"|''|”|in\b|inch|-inch)|\b))(?=.*(?:3440|uwqhd|wqhd|1440p?|ultra ?wide|21:9))",
+     "exclude": r"\b2560 ?x ?1080\b|\b1080p\b|\bfhd\b|\b(?:24|27|32|49)\b ?(?:\"|in|inch)|\b5120\b|\bdell\b|\balienware\b|"
+                r"dead pixel|stuck pixel|burn[- ]?in|\blines?\b on|\bcracked\b|\bstand only\b|\bpower supply only\b|\bmount only\b|"
+                r"\blocal pick ?up only\b|\bpickup only\b",
+     "brand": None, "battery": False},
     {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # his unit has no reader + blank palm rest: needs FPR palm rest too
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
      "must": r"01YR50[89]|01LW329|(?=.*fingerprint)(?=.*\bt480\b(?!s))",
@@ -243,6 +256,23 @@ def verify(part, it, tok):
     if part["id"] == "wwan":
         cap = (re.search(r"\b(128|256|512) ?gb\b|\b1 ?tb\b", it["title"], re.I) or [None])[0] or "size ?"
         notes.append("goes in the WWAN slot (B+M key); boot Kali from F12 so Windows/BitLocker stays untouched")
+    if part["id"] == "mon":
+        spec = " ".join(f"{k}: {v}" for k, v in a.items())
+        allx = " ".join([it["title"], spec, notes_txt, desc])
+        if re.search(r"dead pixel|stuck pixel|burn[- ]?in|backlight bleed|bright spot|\bline(?:s)? (?:on|across) (?:the )?screen|"
+                     r"screen (?:damage|crack|scratch)|\bcracked\b|no power cord|missing (?:the )?stand", " ".join([notes_txt, desc]), re.I) and \
+           not re.search(r"\bno (?:dead|stuck) pixels?\b|\bzero dead pixels?\b", " ".join([notes_txt, desc]), re.I): return None
+        res = " ".join([a.get("resolution", ""), a.get("maximum resolution", ""), it["title"]])
+        if re.search(r"2560 ?x ?1080|1920 ?x ?1080", res) and not re.search(r"3440", res): return None
+        if not re.search(r"3440|uwqhd", res + " " + desc[:1500], re.I): notes.append("confirm 3440x1440")
+        hz = num(a.get("refresh rate", "")) or num((re.search(r"\b(\d{2,3}) ?hz\b", it["title"], re.I) or [""])[0])
+        if hz and hz < 100: return None
+        if re.search(r"\bdell\b|alienware", " ".join([a.get("brand", ""), it["title"]]), re.I): return None
+        panel = (re.search(r"qd-?oled|oled|ips|\bva\b", " ".join([a.get("display technology", ""), a.get("panel type", ""), it["title"]]), re.I) or [""])[0].upper()
+        cap = " · ".join(x for x in [f"{int(hz)}Hz" if hz else "Hz ?", panel] if x)
+        if re.search(r"hdmi ?2\.1", allx, re.I): notes.append("✅ HDMI 2.1: full refresh from the Blade's HDMI port")
+        else: notes.append("HDMI 2.0 likely: Blade 14 drives ~100Hz at 3440x1440 (fine for WoW); confirm ports")
+        notes.append("check power cord + stand included")
     if part["id"] == "wifi":
         notes.append("T480 has no Wi-Fi whitelist; reuse your 2 antenna leads (MHF4)")
     if it["auction"]:
@@ -336,14 +366,14 @@ def run(mode):
             else:
                 rows = rows[:2]
             lines.append(f"**{p['label']}**")
-            if not rows: lines.append("> nothing genuine under $%d out the door right now" % p["max_total"])
+            if not rows: lines.append("> nothing %sunder $%d out the door right now" % ("" if p["id"] == "mon" else "genuine ", p["max_total"]))
             for it, v in rows[:3]:
                 kind = f"🔨 bid, ends {it['ends'].astimezone(ET):%a %-I%p} ET" if it["auction"] and it.get("ends") else "BIN"
                 lines.append(f"> [${v['total']:,.2f} out the door]({it['link']}) · {(v['cap'] + ' · ') if v['cap'] else ''}"
                              f"{v['cond'][:22]} · {kind} · {it['seller'].split(' · ')[-1]}")
             if rows: s["best"][p["id"]] = rows[0][1]["total"]
         best = lambda k: min((v["total"] for _, v in verified.get(k, [])), default=None)
-        total = sum(best(p["id"]) or 0 for p in PARTS if p["id"] not in ("ext", "ram", "ram2"))
+        total = sum(best(p["id"]) or 0 for p in PARTS if p["id"] not in ("ext", "ram", "ram2", "mon"))
         total += best("ram") or 0                      # one 16GB already bought 2026-10-04: only the 2nd stick remains
         ext = min((v["total"] for _, v in verified.get("ext", [])), default=0)   # parked watch -> key absent
         e = {"title": f"🔧 Best genuine prices · {NOW:%a %b %-d}", "color": 0x2ECC71,
