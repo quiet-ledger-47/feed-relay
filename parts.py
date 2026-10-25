@@ -7,7 +7,7 @@ Modes:  python3 parts.py scan   -> post NEW listings that pass every rule (new l
 import json, os, re, sys, time, html, urllib.parse, datetime as dt
 from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
-from relay import ebay_token, ebay_json, aspects_of, num, post, log, NOW
+from relay import ebay_token, ebay_json, aspects_of, num, post, log, NOW, get, parse_feed, sd, fresh, BLOCK
 
 HOOK = os.environ.get("PARTS_HOOK")
 STATE = "state/parts.json"
@@ -316,6 +316,44 @@ def gather(full=False):
         time.sleep(0.25)
     return tok, found
 
+# 2026-10-25 Six: the monitor "doesn't have to be eBay, it can be from Slickdeals as well" -> Slickdeals keyword RSS,
+# same must/exclude rules as the eBay "mon" watch, price parsed from the deal title, posted once per deal (scan mode only).
+SD_MON_Q = ["34 ultrawide monitor", "3440x1440", "ultrawide 1440p", "34\" curved monitor", "uwqhd monitor"]
+PRICE_RE = re.compile(r"\$\s?(\d{2,4}(?:,\d{3})?(?:\.\d{2})?)(?!\s*(?:off|discount|gift|credit|rebate|back))", re.I)
+
+def slickdeals_mon(s):
+    mon = next((p for p in PARTS if p["id"] == "mon"), None)
+    if not mon: return []
+    out, seen_links = [], set()
+    for q in SD_MON_Q:
+        for it in parse_feed(get(sd(q)) or "", "Slickdeals"):
+            t, link = it["title"], it["link"]
+            if link in seen_links or not fresh(it, 72) or BLOCK.search(t): continue
+            seen_links.add(link)
+            k = "sd:" + link
+            if k in s["seen"]: continue
+            if JUNK.search(t) or re.search(mon["exclude"], t, re.I) or not re.search(mon["must"], t, re.I): continue
+            m = PRICE_RE.search(t)
+            if not m: continue
+            price = float(m.group(1).replace(",", ""))
+            total = round(price * (1 + TAX), 2)
+            if not (60 <= price and total <= mon["max_total"]): continue
+            s["seen"][k] = NOW.timestamp()
+            notes = ["✅ HDMI 2.1: full refresh from the Blade" if re.search(r"hdmi ?2\.1", t + " " + (it.get("desc") or ""), re.I)
+                     else "check HDMI version: 2.1 = full refresh from the Blade, 2.0 ≈ 100Hz"]
+            if it.get("thumb") is not None: notes.append(f"Slickdeals thumbs {it['thumb']:+d}")
+            notes.append("price from the deal title; confirm shipping/tax at the store")
+            e = {"title": t[:250], "url": link, "color": 0x8E44AD, "author": {"name": "🛒 SLICKDEALS · " + mon["label"]},
+                 "fields": [{"name": "Est. out the door", "value": f"**${total:,.2f}**", "inline": True},
+                            {"name": "Deal price", "value": f"${price:,.2f}", "inline": True},
+                            {"name": "Check", "value": " · ".join(notes)[:300], "inline": False}],
+                 "footer": {"text": f"Slickdeals deal feed · est. = price + ~{TAX*100:.0f}% tax · verify the store listing"},
+                 "timestamp": NOW.isoformat()}
+            if (it.get("img") or "").startswith("https://"): e["thumbnail"] = {"url": it["img"]}
+            out.append(e)
+        time.sleep(0.6)
+    return out[:4]
+
 def run(mode):
     if not HOOK: log("parts: PARTS_HOOK not set"); sys.exit(1)
     s = load(); first = not s["seen"]
@@ -353,6 +391,12 @@ def run(mode):
                              "content": ("@everyone " if ping else "") + f"**{tag}** · {p['label']}",
                              "allowed_mentions": {"parse": ["everyone"]}, "embeds": [embed(p, it, v, tag)]})
             sent += ok; time.sleep(1.2)
+        try:
+            for e in slickdeals_mon(s):
+                sent += post(HOOK, {"username": "Computer Project", "avatar_url": AV,
+                                    "content": "**🛒 SLICKDEALS** · 34\" ultrawide monitor", "embeds": [e]}); time.sleep(1.2)
+        except Exception as ex:
+            log(f"slickdeals mon fail {type(ex).__name__}")
         log(json.dumps({"mode": "scan", "found": {k: len(v) for k, v in found.items()}, "getitem": checked, "posted": sent}))
     else:
         lines = []
