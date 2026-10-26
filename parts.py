@@ -117,10 +117,15 @@ PARTS = [
            "aoc cu34g2x", "aoc cu34g3s", "xiaomi g34wqi", "xiaomi curved gaming monitor 34", "lg 34gn850", "lg 34gp83a",
            "lg 34gp63a", "msi mag342cq", "msi optix mag342cqr", "gigabyte g34wqc", "samsung odyssey g5 34", "asus tuf vg34vq",
            "sceptre 34 3440x1440", "ktc h34s18", "monoprice 34 ultrawide 144hz", "philips 34 ultrawide 3440x1440"],
-     "must": r"(?=.*\b3[45](?:\.\d)?(?: ?(?:\"|''|”|in\b|inch|-inch)|\b))(?=.*(?:3440|uwqhd|wqhd|1440p?|ultra ?wide|21:9))",
+     "must": r"(?=.*\b(?:monitor|display)\b)(?=.*\b3[45](?:\.\d)?(?: ?(?:\"|''|”|in\b|inch|-inch)|\b))(?=.*(?:3440|uwqhd|wqhd|1440p?|ultra ?wide|21:9))",
      "exclude": r"\b2560 ?x ?1080\b|\b1080p\b|\bfhd\b|\b(?:24|27|32|49)\b ?(?:\"|in|inch)|\b5120\b|\bdell\b|\balienware\b|"
                 r"dead pixel|stuck pixel|burn[- ]?in|\blines?\b on|\bcracked\b|\bstand only\b|\bpower supply only\b|\bmount only\b|"
-                r"\blocal pick ?up only\b|\bpickup only\b",
+                r"\blocal pick ?up only\b|\bpickup only\b|"
+                # 2026-10-26 Six: "screens getting mixed up with parts instead of whole monitor" -> reject panels/boards/spares
+                r"\breplacement\b|\b(?:lcd|led|oled|screen|display|lcm) (?:panel|screen|module|assembly)\b|\bpanel only\b|\bscreen only\b|"
+                r"\b(?:main ?board|mainboard|motherboard|power board|t-?con|led driver|backlight|bezel|housing|back cover|front frame)\b|"
+                r"\bfor parts\b|\bparts only\b|\bbase only\b|\bvesa adapter\b|\bremote only\b|\bcable only\b|"
+                r"\b(?:lm|m|ltm|lsm)\d{3}[a-z]{2}\w*\b",
      "brand": None, "battery": False},
     {"id": "fpr", "label": "Fingerprint reader (01YR508)", "cat": None, "max_total": 40, "off": True,   # his unit has no reader + blank palm rest: needs FPR palm rest too
      "q": ["01YR508", "01LW329 fingerprint", "t480 fingerprint reader", "thinkpad t480 fingerprint sensor"],
@@ -257,6 +262,8 @@ def verify(part, it, tok):
         cap = (re.search(r"\b(128|256|512) ?gb\b|\b1 ?tb\b", it["title"], re.I) or [None])[0] or "size ?"
         notes.append("goes in the WWAN slot (B+M key); boot Kali from F12 so Windows/BitLocker stays untouched")
     if part["id"] == "mon":
+        kind = " ".join([a.get("type", ""), a.get("product type", ""), a.get("compatible model", ""), a.get("compatible brand", "")])
+        if re.search(r"panel|screen replacement|lcd screen|replacement|part|board|module", kind, re.I): return None   # spare part, not a monitor
         spec = " ".join(f"{k}: {v}" for k, v in a.items())
         allx = " ".join([it["title"], spec, notes_txt, desc])
         if re.search(r"dead pixel|stuck pixel|burn[- ]?in|backlight bleed|bright spot|\bline(?:s)? (?:on|across) (?:the )?screen|"
