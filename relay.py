@@ -542,19 +542,16 @@ def rate_quotes(key, ci, co):
     return tuple(x["rate"] for x in (r or {}).get("rates", []) if x.get("rate"))
 
 def stay_windows(n):
-    """n=1: Fri & Sat nights; n>=2: Fri/Sun check-ins. Looks `horizon_days` out (default 150) and
-    samples `windows` dates evenly across it, rotating the sample daily so every weekend gets priced
-    over a week of runs without raising per-run cost."""
-    horizon = int(H.get("horizon_days", 150)); k = int(H.get("windows", 16))
+    """2026-10-25 Six: "I can't stay Monday and Tuesday. The minimum is Friday Saturday to Sunday" -> every stay is
+    check-in FRIDAY, check-out SUNDAY (Fri + Sat nights), regardless of a program's own night count (patch_programs
+    lifts every program to 2 nights). "Aggressive": EVERY Friday in the horizon is priced on every run (no sampling)."""
+    horizon = int(H.get("horizon_days", 150))
     end = NOW.date() + dt.timedelta(days=horizon)
-    d, allw = NOW.date() + dt.timedelta(days=2), []
-    while d + dt.timedelta(days=n) <= end + dt.timedelta(days=1):
-        if (n == 1 and d.weekday() in (4, 5)) or (n >= 2 and d.weekday() in (4, 6)):
-            allw.append((d, d + dt.timedelta(days=n)))
+    d, allw = NOW.date() + dt.timedelta(days=1), []
+    while d + dt.timedelta(days=2) <= end + dt.timedelta(days=1):
+        if d.weekday() == 4: allw.append((d, d + dt.timedelta(days=2)))
         d += dt.timedelta(days=1)
-    if len(allw) <= k: return allw
-    step = len(allw) / k; off = NOW.timetuple().tm_yday % max(int(step), 1)
-    return [allw[min(int(i * step) + off, len(allw) - 1)] for i in range(k)]
+    return allw
 
 # ---- fallback rate source: Google Hotels via SerpApi (free plan 250 searches/mo) ----
 SERP_KEY = os.environ.get("SERPAPI_KEY", "")
@@ -673,7 +670,7 @@ def bp_rows(progs, tax):
     if not geos: return []
     key = os.environ.get("BLUEPILLOW_KEY") or (bp_call("keys", {"label": "feed-relay"}) or {}).get("key")
     if not key: log("bp: no key"); return []
-    k = int(H.get("bp_windows", 10)); combos = []
+    k = max(int(H.get("bp_windows", 10)), 24); combos = []   # 2026-10-25 aggressive: every Friday (~22 in 150 days)
     for n in sorted({int(p.get("nights", 1)) for p in progs}):
         ws = stay_windows(n)
         if len(ws) > k: ws = [ws[int(i * len(ws) / k)] for i in range(k)]
@@ -722,6 +719,7 @@ def patch_programs(progs):
                 else: p[k] = v
         if not drop: out.append(p)
     if patches: log(f"hotels: patch applied, programs {len(progs)}->{len(out)}")
+    for p in out: p["nights"] = 2          # 2026-10-25: Fri->Sun only (see stay_windows); credits apply to the 2-night stay
     return out
 
 def scope(rows, progs):
