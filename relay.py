@@ -703,9 +703,9 @@ def bp_rows(progs, tax):
     return match_rows(entries, progs, tax) if got else []
 
 def patch_programs(progs):
-    """Optional HOTEL_PATCH / HOTEL_PATCH_2 secrets: [{"re": <matches id or label>, "drop": true} | {"re": ..., "set": {key: value|null}}]."""
+    """Optional HOTEL_PATCH / HOTEL_PATCH_2 / HOTEL_PATCH_3 secrets: [{"re": <matches id or label>, "drop": true} | {"re": ..., "set": {key: value|null}}]."""
     patches = []
-    for var in ("HOTEL_PATCH", "HOTEL_PATCH_2"):                         # _2 layers on top without touching the first
+    for var in ("HOTEL_PATCH", "HOTEL_PATCH_2", "HOTEL_PATCH_3"):        # each later patch layers on top without touching the earlier ones
         try: patches += json.loads(os.environ.get(var) or "[]")
         except Exception: log(f"hotels: {var} unreadable, ignored")
     out = []
