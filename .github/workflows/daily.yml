@@ -24,6 +24,7 @@ jobs:
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           HOTEL_PATCH: ${{ secrets.HOTEL_PATCH }}
           HOTEL_PATCH_2: ${{ secrets.HOTEL_PATCH_2 }}
+          HOTEL_PATCH_3: ${{ secrets.HOTEL_PATCH_3 }}
         run: python3 relay.py hotels
       - uses: actions/cache/save@v5
         if: always()
