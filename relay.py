@@ -549,9 +549,24 @@ def stay_windows(n):
     end = NOW.date() + dt.timedelta(days=horizon)
     d, allw = NOW.date() + dt.timedelta(days=1), []
     while d + dt.timedelta(days=2) <= end + dt.timedelta(days=1):
-        if d.weekday() == 4: allw.append((d, d + dt.timedelta(days=2)))
+        if d.weekday() == 4:
+            if n == 1: allw += [(d, d + dt.timedelta(days=1)), (d + dt.timedelta(days=1), d + dt.timedelta(days=2))]
+            else: allw.append((d, d + dt.timedelta(days=2)))
         d += dt.timedelta(days=1)
     return allw
+
+# 2026-10-29: optional trips (secret HOTEL_TRIPS, JSON list) priced outside the weekend rule, e.g. a vacation week abroad:
+#   [{"city", "lat", "lon", "rad", "start", "end", "programs": [ids], "set": {id: {key: value}}}]
+# every check-in day start..end-n is priced for each listed program's night count; "set" overrides program keys there only.
+def trips():
+    try: t = json.loads(os.environ.get("HOTEL_TRIPS") or "[]")
+    except Exception: log("hotels: HOTEL_TRIPS unreadable, ignored"); return []
+    return [x for x in t if x.get("city") and x.get("start") and x.get("end") and x["end"] > NOW.date().isoformat()]
+
+def trip_windows(t, n):
+    d, end, out = max(dt.date.fromisoformat(t["start"]), NOW.date() + dt.timedelta(days=1)), dt.date.fromisoformat(t["end"]), []
+    while d + dt.timedelta(days=n) <= end: out.append((d, d + dt.timedelta(days=n))); d += dt.timedelta(days=1)
+    return out
 
 # ---- fallback rate source: Google Hotels via SerpApi (free plan 250 searches/mo) ----
 SERP_KEY = os.environ.get("SERPAPI_KEY", "")
@@ -623,12 +638,14 @@ def extras(row, p):
 
 def match_rows(entries, progs, tax):
     """entries: (city, nights, check_in, check_out, [props], key_prefix) -> one row per (property, program, window)."""
-    rows = []
+    rows = []; tmap = {t["city"]: t for t in trips()}
     for city, nights, ci, co, props, pre in entries:
         ci_d, co_d = dt.date.fromisoformat(ci), dt.date.fromisoformat(co)
-        v = {"n": nights, "city": city}
+        v = {"n": nights, "city": city}; t = tmap.get(city)
         for h in props:
-            for p in progs:
+            for p0 in progs:
+                if t and p0["id"] not in (t.get("programs") or []): continue
+                p = {**p0, **((t.get("set") or {}).get(p0["id"]) or {})} if t else p0
                 if int(p.get("nights", 1)) != v["n"] or (p.get("until") and co > p["until"]): continue
                 if not re.search(p.get("match_re") or ".", h["name"], re.I): continue
                 if p.get("exclude_re") and re.search(p["exclude_re"], h["name"], re.I): continue
@@ -673,10 +690,19 @@ def bp_rows(progs, tax):
     k = max(int(H.get("bp_windows", 10)), 24); combos = []   # 2026-10-25 aggressive: every Friday (~22 in 150 days)
     for n in sorted({int(p.get("nights", 1)) for p in progs}):
         ws = stay_windows(n)
-        if len(ws) > k: ws = [ws[int(i * len(ws) / k)] for i in range(k)]
+        if n == 1:                                           # keep Fri+Sat of the same weekend together (pairing needs both)
+            wk = [ws[i:i + 2] for i in range(0, len(ws), 2)]
+            if len(wk) > k // 2: wk = [wk[int(i * len(wk) / (k // 2))] for i in range(k // 2)]
+            ws = [w for pair in wk for w in pair]
+        elif len(ws) > k: ws = [ws[int(i * len(ws) / k)] for i in range(k)]
         for city, (lat, lon, rad) in geos.items():
             for w in ws:
                 combos.append((city, n, w[0].isoformat(), w[1].isoformat(), lat, lon, rad, "price_asc"))
+    for t in trips():
+        tn = {int(p.get("nights", 1)) for p in progs if p["id"] in (t.get("programs") or [])}
+        for n in sorted(tn):
+            for w in trip_windows(t, n):
+                combos.append((t["city"], n, w[0].isoformat(), w[1].isoformat(), t["lat"], t["lon"], t.get("rad", 8), "price_asc"))
     def one(c):
         city, n, ci, co, lat, lon, rad, sort = c
         body = {"location": {"type": "coordinates", "value": {"lat": lat, "lon": lon, "radius_km": rad}},
@@ -719,13 +745,15 @@ def patch_programs(progs):
                 else: p[k] = v
         if not drop: out.append(p)
     if patches: log(f"hotels: patch applied, programs {len(progs)}->{len(out)}")
-    for p in out: p["nights"] = 2          # 2026-10-25: Fri->Sun only (see stay_windows); credits apply to the 2-night stay
+    for p in out:                          # 2026-10-25: Fri->Sun only (see stay_windows); credits apply to the 2-night stay
+        if not p.get("keep_nights"): p["nights"] = 2      # 2026-10-29: "keep_nights" = per-night credit (Fri or Sat night)
     return out
 
 def scope(rows, progs):
     """Per-program city scope: a program with "cities_re" only keeps rows whose city label matches."""
     cre = {p["id"]: re.compile(p["cities_re"], re.I) for p in progs if p.get("cities_re")}
-    return [r for r in rows if r["pid"] not in cre or cre[r["pid"]].search(r.get("city") or "")]
+    tc = {t["city"] for t in trips()}
+    return [r for r in rows if r.get("city") in tc or r["pid"] not in cre or cre[r["pid"]].search(r.get("city") or "")]
 
 def run_hotels():
     """Blue Pillow (live multi-OTA) first; programs it can't fill (luxury FHR/Edit lists) fall back to Xotelo, then SerpApi."""
@@ -817,11 +845,28 @@ def post_hotels(rows, progs):
                 if r.get("pts"): tag += f" or ~{r['pts']:,} pts → 🟢 $0"
                 if "alt_oop" in r: stk += f" · {p.get('alt_label', 'smaller credit only')}: " + ("$0" if r["alt_oop"] == 0 else f"${r['alt_oop']:,}")
                 lines.append(f"• [{r['name'][:46]}]({short_url(r)}) · {r['city']} · {day} · ${r['nightly']:,.0f}/nt → ${r['total']:,} all-in · {tag}{stk} · ★{r['rating']}")
+        if p.get("pair"):                                   # 2026-10-29: e.g. one card per hotel -> Fri at A + Sat at B
+            prs = [r for r in rows if r["pid"] == p["id"] and r["n"] == 1]
+            nxt = {}
+            for r in prs: nxt.setdefault((r["city"], r["ci"]), []).append(r)
+            combos = []
+            for a in prs:
+                for b in sorted(nxt.get((a["city"], a["co"]), []), key=lambda r: r["oop"])[:8]:
+                    if b["name"] != a["name"]: combos.append((a["oop"] + b["oop"], a, b))
+            seen_w, plines = set(), []
+            for tot, a, b in sorted(combos, key=lambda c: (c[0] - float(H.get("city_bonus", {}).get(c[1]["city"], 0)), c[1]["ci"])):
+                if (a["city"], a["ci"]) in seen_w or tot > cap: continue
+                seen_w.add((a["city"], a["ci"]))
+                free_hits += tot == 0
+                plines.append(f"• {a['city']} · {a['ci']:%a %b %-d}: [{a['name'][:34]}]({short_url(a)}) → [{b['name'][:34]}]({short_url(b)}) · "
+                              + ("🟢 **$0 out of pocket**" if tot == 0 else f"you pay **${tot:,}**"))
+                if len(plines) == 4: break
+            if plines: lines = ["**Two hotels, one weekend** (one card each):"] + plines + ["**Single nights:**"] + lines
         e = {"title": p.get("label", p["id"]), "color": int(p.get("color", 0x3987E5)),
              "description": "\n".join(lines) or f"_Nothing under ${H.get('max_oop', 150)} out of pocket in the next {H.get('horizon_days', 150)} days._", "footer": {"text": p.get("footer", "")[:2000]}}
         if top and top[0]["img"].startswith("https://"): e["thumbnail"] = {"url": top[0]["img"]}
         embeds.append(e)
-    head = f"🟢 **{free_hits} zero-spend** · 💵 best stays ≤ ${H.get('max_oop', 150)} out of pocket — {NOW:%a %b %-d} (DC · VA · MD, next ~5 months)"
+    head = f"🟢 **{free_hits} zero-spend** · 💵 best stays ≤ ${H.get('max_oop', 150)} out of pocket — {NOW:%a %b %-d} (DC · VA · MD, next ~5 months" + "".join(f" · {t['city']} {t['start'][5:]}→{t['end'][5:]}" for t in trips()) + ")"
     if H.get("note"): head += "\n_" + H["note"] + "_"
     # Discord caps a message at 6,000 embed chars / 10 embeds -> pack embeds into as few messages as fit
     def esize(e): return len(e["title"]) + len(e["description"]) + len(e["footer"]["text"])
