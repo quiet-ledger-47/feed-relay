@@ -8,7 +8,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -25,6 +25,7 @@ jobs:
           HOTEL_PATCH: ${{ secrets.HOTEL_PATCH }}
           HOTEL_PATCH_2: ${{ secrets.HOTEL_PATCH_2 }}
           HOTEL_PATCH_3: ${{ secrets.HOTEL_PATCH_3 }}
+          HOTEL_TRIPS: ${{ secrets.HOTEL_TRIPS }}
         run: python3 relay.py hotels
       - uses: actions/cache/save@v5
         if: always()
