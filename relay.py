@@ -475,6 +475,8 @@ def embed_deal(it, sc, color):
     return e
 
 def run_deals():
+    if HC.get("paused", True):                             # 2026-11-02: both laptops bought - hunter parked; FEED_CONFIG hunter.paused=false re-arms
+        log("deals: laptop hunter parked"); return
     s = load_state(); first = not s["seen"]
     hk = hook("computers")
     stats, hits = {}, []
